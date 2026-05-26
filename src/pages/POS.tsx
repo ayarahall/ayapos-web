@@ -648,9 +648,22 @@ export default function POS() {
       }
       await finalizeInvoice(slug, invoiceId)
 
-      // Mark linked appointment as completed right after finalization
+      await addPayment(slug, invoiceId, {
+        method: payMethod,
+        amountCents: paidCents,
+        reference: payRef || undefined,
+      })
+
+      // Mark linked appointment completed AFTER payment is recorded
+      // (backend may require a paid invoice before accepting 'completed')
       let apptFailed = false
       const linked = linkedAppointmentRef.current
+        ?? (activeAppointmentDraftId
+          ? (() => {
+              const d = readPosDraftTabs().find(d => d.id === activeAppointmentDraftId)
+              return d?.appointmentId ? { appointmentId: d.appointmentId, branchId: d.branchId } : null
+            })()
+          : null)
       if (linked?.appointmentId) {
         setCompletedInvoiceLinkedAppointment({ id: linked.appointmentId, branchId: linked.branchId })
         try {
@@ -662,12 +675,6 @@ export default function POS() {
         setCompletedInvoiceLinkedAppointment(null)
       }
       setAppointmentUpdateFailed(apptFailed)
-
-      await addPayment(slug, invoiceId, {
-        method: payMethod,
-        amountCents: paidCents,
-        reference: payRef || undefined,
-      })
       const invoice = await getInvoice(slug, invoiceId)
       setCompletedInvoice(invoice)
       if (activeAppointmentDraftId) {
