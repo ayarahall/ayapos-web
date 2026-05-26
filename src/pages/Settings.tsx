@@ -11,7 +11,7 @@ import Button from '../components/ui/Button'
 import Badge from '../components/ui/Badge'
 import Spinner from '../components/ui/Spinner'
 import { ROLE_LABELS } from '../types'
-import { defaultPosSettings, loadPosSettings, savePosSettings, type PosSettings } from '../utils/posSettings'
+import { loadPosSettings, savePosSettings, type PosSettings } from '../utils/posSettings'
 
 const defaultPrintSettings: PrintSettings = {
   companyName: '', companyLogoUrl: '', companyPhone: '',

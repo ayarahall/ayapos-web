@@ -1,4 +1,4 @@
-import { create } from 'zustand'
+import { create, type StateCreator } from 'zustand'
 
 interface ToastItem {
   id: number
@@ -15,22 +15,21 @@ interface ToastState {
 }
 
 let _id = 0
-const DURATIONS = { success: 3000, error: 4500, info: 3500 }
+const DURATIONS: Record<ToastItem['type'], number> = { success: 3000, error: 4500, info: 3500 }
+type ToastSet = Parameters<StateCreator<ToastState>>[0]
 
 export const useToastStore = create<ToastState>((set) => ({
   toasts: [],
-  success: (message) => _push(set, 'success', message),
-  error:   (message) => _push(set, 'error',   message),
-  info:    (message) => _push(set, 'info',    message),
-  remove:  (id)      => set(s => ({ toasts: s.toasts.filter(t => t.id !== id) })),
+  success: (message) => pushToast(set, 'success', message),
+  error: (message) => pushToast(set, 'error', message),
+  info: (message) => pushToast(set, 'info', message),
+  remove: (id) => set((state) => ({ toasts: state.toasts.filter((toast) => toast.id !== id) })),
 }))
 
-function _push(
-  set: Parameters<typeof create<ToastState>>[0] extends (set: infer S) => unknown ? S : never,
-  type: ToastItem['type'],
-  message: string,
-) {
+function pushToast(set: ToastSet, type: ToastItem['type'], message: string) {
   const id = ++_id
-  set(s => ({ toasts: [...s.toasts, { id, type, message }] }))
-  setTimeout(() => set(s => ({ toasts: s.toasts.filter(t => t.id !== id) })), DURATIONS[type])
+  set((state) => ({ toasts: [...state.toasts, { id, type, message }] }))
+  setTimeout(() => {
+    set((state) => ({ toasts: state.toasts.filter((toast) => toast.id !== id) }))
+  }, DURATIONS[type])
 }

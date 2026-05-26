@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   Plus, UserCircle2, Calendar, Clock, FileText,
-  Layers, CheckCircle2, XCircle, AlertCircle, LogIn, LogOut, Edit2,
+  Layers, CheckCircle2, LogIn, LogOut, Edit2,
 } from 'lucide-react'
 import {
   listEmployees, getAttendanceSummary, createEmployee, updateEmployee,

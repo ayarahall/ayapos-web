@@ -19,7 +19,7 @@ import Modal from '../components/ui/Modal'
 import Input from '../components/ui/Input'
 import type { Branch, CartItem, Customer, InvoiceDetail, ProductListItem, ServiceListItem } from '../types'
 import { loadPosSettings } from '../utils/posSettings'
-import { formatDateTime } from '../utils/date'
+import { addMinutesToDateTimeValue, formatDateTime, toApiLocalDateTime, toDubaiDateTimeValue } from '../utils/date'
 import { readPosDraftTabs, removePosDraftTab, writePosDraftTabs, upsertPosDraftTab, type PosDraftTab } from '../utils/posDrafts'
 
 interface SaleCartItem extends CartItem {
@@ -80,6 +80,12 @@ const toSaleCartItems = (items: CartItem[]): SaleCartItem[] =>
     ...item,
     originalUnitPriceCents: (item as SaleCartItem).originalUnitPriceCents ?? item.unitPriceCents,
   }))
+const getLinkedAppointmentFromDraft = (draft?: PosDraftTab | null) => {
+  if (!draft) return null
+  const appointmentId = draft.appointmentId
+    ?? (draft.id.startsWith('appointment:') ? draft.id.slice('appointment:'.length) : undefined)
+  return appointmentId ? { appointmentId, branchId: draft.branchId } : null
+}
 
 export default function POS() {
   const qc = useQueryClient()
@@ -172,9 +178,7 @@ export default function POS() {
   useEffect(() => {
     if (!activeAppointmentDraftId) { linkedAppointmentRef.current = null; return }
     const draft = readPosDraftTabs().find(d => d.id === activeAppointmentDraftId)
-    linkedAppointmentRef.current = draft?.appointmentId
-      ? { appointmentId: draft.appointmentId, branchId: draft.branchId }
-      : null
+    linkedAppointmentRef.current = getLinkedAppointmentFromDraft(draft)
   }, [activeAppointmentDraftId])
 
   useEffect(() => {
@@ -575,16 +579,16 @@ export default function POS() {
     setWalkinLoading(true)
     setWalkinError('')
     try {
-      const now = new Date()
-      const end = new Date(now.getTime() + (svc.durationMin ?? 60) * 60 * 1000)
+      const startAt = toDubaiDateTimeValue()
+      const endAt = addMinutesToDateTimeValue(startAt, svc.durationMin ?? 60)
       const appointmentId = await createAppointment(slug, {
         customerId,
         serviceId: walkinForm.serviceId,
-        startAt: now.toISOString(),
-        endAt: end.toISOString(),
+        startAt: toApiLocalDateTime(startAt),
+        endAt: toApiLocalDateTime(endAt),
         resourceName: walkinForm.resourceName || undefined,
       })
-      await updateAppointmentStatus(slug, appointmentId, 'confirmed')
+      await updateAppointmentStatus(slug, appointmentId, 'checked_in')
 
       const customerName =
         walkinCustomerMode === 'new'
@@ -648,20 +652,28 @@ export default function POS() {
       }
       await finalizeInvoice(slug, invoiceId)
 
+      const linkedBeforePayment = linkedAppointmentRef.current
+        ?? (activeAppointmentDraftId
+          ? (() => {
+              const d = readPosDraftTabs().find(d => d.id === activeAppointmentDraftId)
+              return getLinkedAppointmentFromDraft(d)
+            })()
+          : null)
+
       await addPayment(slug, invoiceId, {
         method: payMethod,
         amountCents: paidCents,
         reference: payRef || undefined,
+        appointmentId: linkedBeforePayment?.appointmentId,
       })
 
-      // Mark linked appointment completed AFTER payment is recorded
-      // (backend may require a paid invoice before accepting 'completed')
+      // Mark linked appointment completed AFTER payment is recorded.
       let apptFailed = false
-      const linked = linkedAppointmentRef.current
+      const linked = linkedBeforePayment ?? linkedAppointmentRef.current
         ?? (activeAppointmentDraftId
           ? (() => {
               const d = readPosDraftTabs().find(d => d.id === activeAppointmentDraftId)
-              return d?.appointmentId ? { appointmentId: d.appointmentId, branchId: d.branchId } : null
+              return getLinkedAppointmentFromDraft(d)
             })()
           : null)
       if (linked?.appointmentId) {

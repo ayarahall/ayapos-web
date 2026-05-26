@@ -3,7 +3,7 @@ import { useQuery } from '@tanstack/react-query'
 import { CalendarCheck, CheckCircle2, Clock, ShoppingCart, DollarSign, TrendingUp, AlertCircle, Package } from 'lucide-react'
 import { getDailySummary, getCurrentSession } from '../api/cashier'
 import { getInvoices } from '../api/invoices'
-import { getAppointments } from '../api/appointments'
+import { getAppointments, type AppointmentListItem } from '../api/appointments'
 import { useAuthStore } from '../store/authStore'
 import { useLangStore } from '../store/langStore'
 import { useT } from '../i18n/useT'
@@ -11,14 +11,11 @@ import Card from '../components/ui/Card'
 import Badge from '../components/ui/Badge'
 import Spinner from '../components/ui/Spinner'
 import { STATUS_LABELS } from '../types'
-import { formatDate, formatShortDate, formatTime, todayInDubaiISO } from '../utils/date'
+import { dateRangeForDubaiDay, formatDate, formatShortDate, formatTime, todayInDubaiISO } from '../utils/date'
 import { readPosDraftTabs, type PosDraftTab } from '../utils/posDrafts'
 
 const fmt = (cents: number) =>
   new Intl.NumberFormat('en-AE', { minimumFractionDigits: 2 }).format(cents / 100)
-
-const isOpenAppointment = (status: string) =>
-  !['completed', 'cancelled', 'no_show', 'noshow'].includes(status.toLowerCase())
 
 const statusVariant = (s: string): 'green' | 'yellow' | 'blue' | 'gray' | 'red' => {
   if (s === 'Paid') return 'green'
@@ -28,13 +25,55 @@ const statusVariant = (s: string): 'green' | 'yellow' | 'blue' | 'gray' | 'red' 
   return 'red'
 }
 
-const nextDayISO = (date: string) => {
-  const value = new Date(`${date}T00:00:00`)
-  value.setDate(value.getDate() + 1)
-  const year = value.getFullYear()
-  const month = String(value.getMonth() + 1).padStart(2, '0')
-  const day = String(value.getDate()).padStart(2, '0')
-  return `${year}-${month}-${day}`
+const isCheckedIn = (status: string) => status === 'checked_in' || status === 'confirmed'
+const isPastAppointment = (endAt: string) => new Date(endAt).getTime() < Date.now()
+
+function AppointmentColumn({
+  title,
+  count,
+  items,
+  colorClass,
+  dotClass,
+  badge,
+  emptyText,
+  lang,
+}: {
+  title: string
+  count: number
+  items: AppointmentListItem[]
+  colorClass: string
+  dotClass: string
+  badge?: { label: string; variant: 'green' | 'yellow' | 'blue' | 'gray' | 'red' | 'purple' }
+  emptyText: string
+  lang: string
+}) {
+  return (
+    <div>
+      <div className="flex items-center gap-2 px-4 py-3 border-b border-gray-50">
+        <div className={`w-2 h-2 rounded-full ${dotClass}`} />
+        <p className={`text-xs font-bold ${colorClass}`}>{title} ({count})</p>
+      </div>
+      {items.length > 0 ? (
+        <div className="divide-y divide-gray-50">
+          {items.slice(0, 5).map((a) => (
+            <div key={a.id} className="flex items-start justify-between gap-2 px-4 py-3">
+              <div className="min-w-0">
+                <p className="text-sm font-semibold text-gray-900 truncate">{a.customerName || '-'}</p>
+                <p className="text-xs text-gray-500 mt-0.5 truncate">{a.serviceName}</p>
+              </div>
+              {badge ? (
+                <Badge variant={badge.variant}>{badge.label}</Badge>
+              ) : (
+                <p className="text-xs font-bold text-blue-600 flex-shrink-0">{formatTime(a.startAt, lang)}</p>
+              )}
+            </div>
+          ))}
+        </div>
+      ) : (
+        <p className="text-center text-gray-400 py-6 text-xs">{emptyText}</p>
+      )}
+    </div>
+  )
 }
 
 export default function Dashboard() {
@@ -74,14 +113,14 @@ export default function Dashboard() {
   })
 
   const today = todayInDubaiISO()
-  const tomorrow = nextDayISO(today)
+  const { dateFrom, dateTo } = dateRangeForDubaiDay(today)
 
   const { data: todayAppointments, isLoading: appointmentsLoading } = useQuery({
-    queryKey: ['appointments', slug, branchId ?? 'login-branch', 'dashboard-today', today, tomorrow],
-    queryFn: () => getAppointments(slug, { page: 1, pageSize: 25, dateFrom: today, dateTo: tomorrow }),
+    queryKey: ['appointments', slug, branchId ?? 'login-branch', 'dashboard-today', dateFrom, dateTo],
+    queryFn: () => getAppointments(slug, { page: 1, pageSize: 50, dateFrom, dateTo }),
     enabled: !!slug,
     refetchOnWindowFocus: true,
-    refetchInterval: 60_000,
+    refetchInterval: 30_000,
   })
 
   const hour = new Date().getHours()
@@ -91,25 +130,23 @@ export default function Dashboard() {
     return (
       <div className="space-y-6">
         <div className="bg-gradient-to-l from-blue-600 to-blue-700 rounded-2xl p-6 text-white">
-          <h2 className="text-2xl font-bold">{greeting}, {user?.username} 👋</h2>
+          <h2 className="text-2xl font-bold">{greeting}, {user?.username}</h2>
           <p className="text-blue-200 mt-1">AyaPOS Platform</p>
-        </div>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <Card className="p-5">
-            <p className="text-gray-500 text-sm">{t.nav.branches}</p>
-            <p className="text-2xl font-bold text-gray-900 mt-1">{t.nav.users}</p>
-          </Card>
         </div>
       </div>
     )
   }
 
   const appointmentItems = todayAppointments?.items ?? []
-  const scheduledAppointments = appointmentItems.filter((item) => item.status === 'scheduled')
-  const checkedInAppointments = appointmentItems.filter((item) => item.status === 'confirmed')
-  const noShowAppointments = appointmentItems.filter((item) => item.status === 'no_show')
+  const openDraftAppointmentIds = new Set(
+    openPosDrafts
+      .map((draft) => draft.appointmentId ?? (draft.id.startsWith('appointment:') ? draft.id.slice('appointment:'.length) : undefined))
+      .filter((id): id is string => Boolean(id))
+  )
+  const noShowAppointments = appointmentItems.filter((item) => item.status === 'no_show' || (item.status === 'scheduled' && !openDraftAppointmentIds.has(item.id) && isPastAppointment(item.endAt)))
+  const scheduledAppointments = appointmentItems.filter((item) => item.status === 'scheduled' && !openDraftAppointmentIds.has(item.id) && !isPastAppointment(item.endAt))
+  const checkedInAppointments = appointmentItems.filter((item) => isCheckedIn(item.status) || (item.status === 'scheduled' && openDraftAppointmentIds.has(item.id)))
   const completedAppointments = appointmentItems.filter((item) => item.status === 'completed')
-  // pendingAppointments = only truly booked (not yet arrived)
   const pendingAppointments = scheduledAppointments.length
   const invoiceCount = summary?.invoiceCount ?? summary?.totalInvoices ?? 0
   const grossSalesCents = summary?.grossSalesCents ?? summary?.totalSalesCents ?? 0
@@ -125,33 +162,27 @@ export default function Dashboard() {
     { label: t.dashboard.invoicesCount, value: invoiceCount, icon: ShoppingCart, color: 'text-blue-600', bg: 'bg-blue-50' },
     { label: t.dashboard.dailySales, value: `${fmt(grossSalesCents)} AED`, icon: TrendingUp, color: 'text-green-600', bg: 'bg-green-50' },
     { label: t.reports.cash, value: `${fmt(cashCents)} AED`, icon: DollarSign, color: 'text-amber-600', bg: 'bg-amber-50' },
-    { label: lang === 'ar' ? 'لم يحضروا بعد' : 'Not Yet Arrived', value: pendingAppointments, icon: CalendarCheck, color: 'text-purple-600', bg: 'bg-purple-50' },
+    { label: lang === 'ar' ? 'مواعيد بانتظار الحضور' : 'Waiting Check-In', value: pendingAppointments, icon: CalendarCheck, color: 'text-purple-600', bg: 'bg-purple-50' },
   ]
 
   const dailyTasks = [
     {
-      label: session
-        ? (lang === 'ar' ? 'جلسة الكاشير مفتوحة' : 'Cashier Session Open')
-        : (lang === 'ar' ? 'فتح جلسة الكاشير' : 'Open Cashier Session'),
-      detail: session
-        ? (lang === 'ar' ? `بدأت ${formatTime(session.openedAt, lang)}` : `Started at ${formatTime(session.openedAt, lang)}`)
-        : (lang === 'ar' ? 'افتح الجلسة قبل استقبال المدفوعات' : 'Open session before accepting payments'),
+      label: session ? (lang === 'ar' ? 'جلسة الكاشير مفتوحة' : 'Cashier Session Open') : (lang === 'ar' ? 'فتح جلسة الكاشير' : 'Open Cashier Session'),
+      detail: session ? (lang === 'ar' ? `بدأت ${formatTime(session.openedAt, lang)}` : `Started at ${formatTime(session.openedAt, lang)}`) : (lang === 'ar' ? 'افتح الجلسة قبل استقبال المدفوعات' : 'Open session before accepting payments'),
       done: !!session,
       icon: Clock,
     },
     {
       label: lang === 'ar' ? 'متابعة مواعيد اليوم' : "Today's Appointments",
       detail: lang === 'ar'
-        ? `${checkedInAppointments.length} حضروا، ${completedAppointments.length} مكتملة من أصل ${appointmentItems.length}`
-        : `${checkedInAppointments.length} checked in, ${completedAppointments.length} done of ${appointmentItems.length}`,
+        ? `${checkedInAppointments.length} تم تسجيل حضورهم، ${completedAppointments.length} مكتملة، ${noShowAppointments.length} لم يحضروا من أصل ${appointmentItems.length}`
+        : `${checkedInAppointments.length} checked in, ${completedAppointments.length} completed, ${noShowAppointments.length} no-show of ${appointmentItems.length}`,
       done: appointmentItems.length > 0 && pendingAppointments === 0,
       icon: CalendarCheck,
     },
     {
       label: lang === 'ar' ? 'مراجعة فواتير اليوم' : "Today's Invoices",
-      detail: lang === 'ar'
-        ? `${invoiceCount} فاتورة، ${paidInvoices} مدفوعة ضمن آخر النشاط`
-        : `${invoiceCount} invoices, ${paidInvoices} paid`,
+      detail: lang === 'ar' ? `${invoiceCount} فاتورة، ${paidInvoices} مدفوعة` : `${invoiceCount} invoices, ${paidInvoices} paid`,
       done: invoiceCount > 0,
       icon: ShoppingCart,
     },
@@ -160,10 +191,8 @@ export default function Dashboard() {
   return (
     <div className="space-y-6">
       <div className="bg-gradient-to-l from-blue-600 to-blue-700 rounded-2xl p-6 text-white">
-        <h2 className="text-2xl font-bold">{greeting}, {user?.username} 👋</h2>
-        <p className="text-blue-200 mt-1">
-          {formatDate(new Date(), lang)}
-        </p>
+        <h2 className="text-2xl font-bold">{greeting}, {user?.username}</h2>
+        <p className="text-blue-200 mt-1">{formatDate(new Date(), lang)}</p>
       </div>
 
       {!session && (
@@ -175,9 +204,7 @@ export default function Dashboard() {
       {session && (
         <div className="flex items-center gap-3 bg-green-50 border border-green-200 rounded-xl px-4 py-3 text-green-800">
           <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
-          <p className="text-sm font-medium">
-            {formatTime(session.openedAt, lang)}
-          </p>
+          <p className="text-sm font-medium">{formatTime(session.openedAt, lang)}</p>
         </div>
       )}
 
@@ -216,112 +243,21 @@ export default function Dashboard() {
                 </div>
               ))}
               {(invoicesPage?.items ?? []).length === 0 && (
-                <p className="text-center text-gray-400 py-8 text-sm">
-                  {lang === 'ar' ? 'لا توجد فواتير' : 'No invoices'}
-                </p>
+                <p className="text-center text-gray-400 py-8 text-sm">{lang === 'ar' ? 'لا توجد فواتير' : 'No invoices'}</p>
               )}
             </div>
           )}
         </Card>
 
-        <Card title={lang === 'ar' ? 'مواعيد اليوم — الحالة الحية' : "Today's Appointments — Live Status"} className="lg:col-span-3">
+        <Card title={lang === 'ar' ? 'مواعيد اليوم - الحالة الحية' : "Today's Appointments - Live Status"} className="lg:col-span-3">
           {appointmentsLoading ? (
             <div className="flex justify-center py-8"><Spinner size="md" className="text-blue-600" /></div>
           ) : (
             <div className="grid grid-cols-2 md:grid-cols-4 divide-y-2 md:divide-y-0 md:divide-x md:divide-x-reverse divide-gray-100">
-
-              {/* 1 — Booked (scheduled) */}
-              <div>
-                <div className="flex items-center gap-2 px-4 py-3 border-b border-gray-50">
-                  <div className="w-2 h-2 rounded-full bg-blue-400" />
-                  <p className="text-xs font-bold text-blue-700">{lang === 'ar' ? 'محجوز' : 'Booked'} ({scheduledAppointments.length})</p>
-                </div>
-                {scheduledAppointments.length > 0 ? (
-                  <div className="divide-y divide-gray-50">
-                    {scheduledAppointments.slice(0, 5).map((a) => (
-                      <div key={a.id} className="flex items-start justify-between gap-2 px-4 py-3">
-                        <div className="min-w-0">
-                          <p className="text-sm font-semibold text-gray-900 truncate">{a.customerName || '—'}</p>
-                          <p className="text-xs text-gray-500 mt-0.5 truncate">{a.serviceName}</p>
-                        </div>
-                        <p className="text-xs font-bold text-blue-600 flex-shrink-0">{formatTime(a.startAt, lang)}</p>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <p className="text-center text-gray-400 py-6 text-xs">{lang === 'ar' ? 'لا يوجد' : 'None'}</p>
-                )}
-              </div>
-
-              {/* 2 — Checked In / Attended (confirmed) */}
-              <div>
-                <div className="flex items-center gap-2 px-4 py-3 border-b border-gray-50">
-                  <div className="w-2 h-2 rounded-full bg-emerald-500" />
-                  <p className="text-xs font-bold text-emerald-700">{lang === 'ar' ? 'حضر / يُخدَّم' : 'Checked In'} ({checkedInAppointments.length})</p>
-                </div>
-                {checkedInAppointments.length > 0 ? (
-                  <div className="divide-y divide-gray-50">
-                    {checkedInAppointments.slice(0, 5).map((a) => (
-                      <div key={a.id} className="flex items-start justify-between gap-2 px-4 py-3">
-                        <div className="min-w-0">
-                          <p className="text-sm font-semibold text-gray-900 truncate">{a.customerName || '—'}</p>
-                          <p className="text-xs text-gray-500 mt-0.5 truncate">{a.serviceName}</p>
-                        </div>
-                        <Badge variant="green">{lang === 'ar' ? 'حضر' : 'In'}</Badge>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <p className="text-center text-gray-400 py-6 text-xs">{lang === 'ar' ? 'لا يوجد بعد' : 'None yet'}</p>
-                )}
-              </div>
-
-              {/* 3 — No-shows */}
-              <div>
-                <div className="flex items-center gap-2 px-4 py-3 border-b border-gray-50">
-                  <div className="w-2 h-2 rounded-full bg-red-500" />
-                  <p className="text-xs font-bold text-red-700">{lang === 'ar' ? 'لم يحضر' : 'No-show'} ({noShowAppointments.length})</p>
-                </div>
-                {noShowAppointments.length > 0 ? (
-                  <div className="divide-y divide-gray-50">
-                    {noShowAppointments.slice(0, 5).map((a) => (
-                      <div key={a.id} className="flex items-start justify-between gap-2 px-4 py-3">
-                        <div className="min-w-0">
-                          <p className="text-sm font-semibold text-gray-900 truncate">{a.customerName || '—'}</p>
-                          <p className="text-xs text-gray-500 mt-0.5 truncate">{a.serviceName}</p>
-                        </div>
-                        <p className="text-xs font-bold text-gray-400 flex-shrink-0">{formatTime(a.startAt, lang)}</p>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <p className="text-center text-gray-400 py-6 text-xs">{lang === 'ar' ? 'لا يوجد' : 'None'}</p>
-                )}
-              </div>
-
-              {/* 4 — Completed */}
-              <div>
-                <div className="flex items-center gap-2 px-4 py-3 border-b border-gray-50">
-                  <div className="w-2 h-2 rounded-full bg-gray-400" />
-                  <p className="text-xs font-bold text-gray-600">{lang === 'ar' ? 'مكتمل — تم الدفع' : 'Completed'} ({completedAppointments.length})</p>
-                </div>
-                {completedAppointments.length > 0 ? (
-                  <div className="divide-y divide-gray-50">
-                    {completedAppointments.slice(0, 5).map((a) => (
-                      <div key={a.id} className="flex items-start justify-between gap-2 px-4 py-3">
-                        <div className="min-w-0">
-                          <p className="text-sm font-semibold text-gray-500 truncate">{a.customerName || '—'}</p>
-                          <p className="text-xs text-gray-400 mt-0.5 truncate">{a.serviceName}</p>
-                        </div>
-                        <Badge variant="gray">{lang === 'ar' ? 'مكتمل' : 'Done'}</Badge>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <p className="text-center text-gray-400 py-6 text-xs">{lang === 'ar' ? 'لا يوجد بعد' : 'None yet'}</p>
-                )}
-              </div>
-
+              <AppointmentColumn title={lang === 'ar' ? 'محجوز' : 'Booked'} count={scheduledAppointments.length} items={scheduledAppointments} colorClass="text-blue-700" dotClass="bg-blue-400" emptyText={lang === 'ar' ? 'لا يوجد' : 'None'} lang={lang} />
+              <AppointmentColumn title={lang === 'ar' ? 'تم تسجيل الحضور' : 'Checked In'} count={checkedInAppointments.length} items={checkedInAppointments} colorClass="text-emerald-700" dotClass="bg-emerald-500" badge={{ label: lang === 'ar' ? 'في الكاشير' : 'POS', variant: 'green' }} emptyText={lang === 'ar' ? 'لا يوجد بعد' : 'None yet'} lang={lang} />
+              <AppointmentColumn title={lang === 'ar' ? 'لم يحضر' : 'No-show'} count={noShowAppointments.length} items={noShowAppointments} colorClass="text-red-700" dotClass="bg-red-500" badge={{ label: lang === 'ar' ? 'لم يحضر' : 'No-show', variant: 'red' }} emptyText={lang === 'ar' ? 'لا يوجد' : 'None'} lang={lang} />
+              <AppointmentColumn title={lang === 'ar' ? 'مكتمل - تم الدفع' : 'Completed'} count={completedAppointments.length} items={completedAppointments} colorClass="text-gray-600" dotClass="bg-gray-400" badge={{ label: lang === 'ar' ? 'مكتمل' : 'Done', variant: 'gray' }} emptyText={lang === 'ar' ? 'لا يوجد بعد' : 'None yet'} lang={lang} />
             </div>
           )}
         </Card>
@@ -335,9 +271,7 @@ export default function Dashboard() {
                   <div key={draft.id} className="flex items-start justify-between gap-3 px-5 py-3">
                     <div className="min-w-0">
                       <p className="truncate text-sm font-semibold text-gray-900">{draft.customerName || draft.label}</p>
-                      <p className="mt-0.5 truncate text-xs text-gray-500">
-                        {draft.items.length} {lang === 'ar' ? 'بند - لم يتم الدفع بعد' : 'items - unpaid'}
-                      </p>
+                      <p className="mt-0.5 truncate text-xs text-gray-500">{draft.items.length} {lang === 'ar' ? 'بند - لم يتم الدفع بعد' : 'items - unpaid'}</p>
                     </div>
                     <div className="text-left">
                       <p className="text-sm font-bold text-gray-900">{fmt(totalCents)} AED</p>
@@ -348,9 +282,7 @@ export default function Dashboard() {
               })}
             </div>
           ) : (
-            <p className="py-8 text-center text-sm text-gray-400">
-              {lang === 'ar' ? 'لا توجد فواتير مفتوحة' : 'No open invoices'}
-            </p>
+            <p className="py-8 text-center text-sm text-gray-400">{lang === 'ar' ? 'لا توجد فواتير مفتوحة' : 'No open invoices'}</p>
           )}
         </Card>
 
@@ -369,9 +301,7 @@ export default function Dashboard() {
               </div>
             ))}
             {topItems.length === 0 && (
-              <p className="text-center text-gray-400 py-8 text-sm">
-                {lang === 'ar' ? 'لا توجد مبيعات اليوم' : 'No sales today'}
-              </p>
+              <p className="text-center text-gray-400 py-8 text-sm">{lang === 'ar' ? 'لا توجد مبيعات اليوم' : 'No sales today'}</p>
             )}
           </div>
         </Card>

@@ -1,4 +1,4 @@
-﻿import { useState } from 'react'
+import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
 import {
@@ -20,34 +20,34 @@ import Badge from '../components/ui/Badge'
 import Button from '../components/ui/Button'
 import Modal from '../components/ui/Modal'
 import Spinner from '../components/ui/Spinner'
-import { formatShortDate, formatTime as formatDubaiTime, todayInDubaiISO } from '../utils/date'
+import { addDaysToISODate, addMinutesToDateTimeValue, formatShortDate, formatTime as formatDubaiTime, todayInDubaiISO, toApiLocalDateTime, toDubaiDateTimeValue } from '../utils/date'
 import { upsertPosDraftTab } from '../utils/posDrafts'
 
 /* helpers */
 
 const STATUS_AR: Record<string, string> = {
   scheduled: 'محجوز',
-  confirmed: 'حضر',
-  completed: 'مكتمل',
+  checked_in: 'تم تسجيل الحضور',
+  confirmed: 'تم تسجيل الحضور',
+  attended: 'تمت الخدمة',
+  completed: 'مكتمل - تم الدفع',
   cancelled: 'ملغي',
   no_show: 'لم يحضر',
 }
 
-const STATUS_VARIANT: Record<string, 'blue' | 'green' | 'gray' | 'red' | 'yellow'> = {
+const STATUS_VARIANT: Record<string, 'blue' | 'green' | 'gray' | 'red' | 'yellow' | 'purple'> = {
   scheduled: 'blue',
+  checked_in: 'green',
   confirmed: 'green',
+  attended: 'purple',
   completed: 'gray',
   cancelled: 'red',
   no_show: 'yellow',
 }
 
-const ALL_STATUSES = ['scheduled', 'confirmed', 'completed', 'cancelled', 'no_show']
+const ALL_STATUSES = ['scheduled', 'checked_in', 'completed', 'cancelled', 'no_show']
 
-const toLocalDatetimeValue = (iso: string) => {
-  const d = new Date(iso)
-  const pad = (n: number) => String(n).padStart(2, '0')
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
-}
+const toLocalDatetimeValue = (iso: string) => toDubaiDateTimeValue(new Date(iso))
 
 const todayISO = () => todayInDubaiISO()
 
@@ -69,11 +69,7 @@ const minutesToTime = (minutes: number) =>
 const minutesToDatetimeValue = (date: string, minutes: number) =>
   `${date}T${minutesToTime(minutes)}`
 
-const addMinutesToDatetimeValue = (value: string, minutes: number) => {
-  const d = new Date(value)
-  d.setMinutes(d.getMinutes() + minutes)
-  return toLocalDatetimeValue(d.toISOString())
-}
+const addMinutesToDatetimeValue = addMinutesToDateTimeValue
 
 const minutesOfDay = (iso: string) => {
   const [, time = '00:00'] = toLocalDatetimeValue(iso).split('T')
@@ -84,6 +80,20 @@ const minutesOfDay = (iso: string) => {
 const roundToQuarter = (minutes: number) =>
   Math.round(minutes / 15) * 15
 
+const layoutScheduleEntries = (items: AppointmentScheduleEntry[]) => {
+  const sorted = [...items].sort((a, b) => new Date(a.startAt).getTime() - new Date(b.startAt).getTime())
+  const laneEnds: number[] = []
+  const positioned = sorted.map((entry) => {
+    const start = minutesOfDay(entry.startAt)
+    const end = Math.max(start + 30, minutesOfDay(entry.endAt))
+    let lane = laneEnds.findIndex((laneEnd) => laneEnd <= start)
+    if (lane === -1) lane = laneEnds.length
+    laneEnds[lane] = end
+    return { entry, lane }
+  })
+  const laneCount = Math.max(1, laneEnds.length)
+  return positioned.map((item) => ({ ...item, laneCount }))
+}
 /* empty form */
 interface ApptForm {
   customerId: string
@@ -183,8 +193,8 @@ export default function Appointments() {
       createAppointment(slug, {
         customerId: f.customerId,
         serviceId: f.serviceId,
-        startAt: new Date(f.startAt).toISOString(),
-        endAt: new Date(f.endAt).toISOString(),
+        startAt: toApiLocalDateTime(f.startAt),
+        endAt: toApiLocalDateTime(f.endAt),
         resourceName: f.resourceName || undefined,
         notes: f.notes || undefined,
       }),
@@ -196,8 +206,8 @@ export default function Appointments() {
       updateAppointment(slug, editItem!.id, {
         customerId: f.customerId,
         serviceId: f.serviceId,
-        startAt: new Date(f.startAt).toISOString(),
-        endAt: new Date(f.endAt).toISOString(),
+        startAt: toApiLocalDateTime(f.startAt),
+        endAt: toApiLocalDateTime(f.endAt),
         resourceName: f.resourceName || undefined,
         notes: f.notes || undefined,
       }),
@@ -210,11 +220,11 @@ export default function Appointments() {
   })
 
   const markArrivalMut = useMutation({
-    mutationFn: async ({ entry, arrived }: { entry: AppointmentScheduleEntry; arrived: boolean }) => {
-      const nextStatus = arrived ? 'confirmed' : 'no_show'
+    mutationFn: async ({ entry, status }: { entry: AppointmentScheduleEntry; status: 'checked_in' | 'no_show' | 'cancelled' }) => {
+      const nextStatus = status
       await updateAppointmentStatus(slug, entry.id, nextStatus)
 
-      if (arrived && entry.customerId && entry.serviceId) {
+      if (status === 'checked_in' && entry.customerId && entry.serviceId) {
         const priceCents = Math.round((entry.servicePrice ?? 0) * 100)
         upsertPosDraftTab({
           id: `appointment:${entry.id}`,
@@ -234,11 +244,11 @@ export default function Appointments() {
         })
       }
 
-      return { arrived }
+      return { status }
     },
-    onSuccess: ({ arrived }) => {
+    onSuccess: ({ status }) => {
       invalidate()
-      if (arrived) navigate('/pos')
+      if (status === 'checked_in') navigate('/pos')
     },
   })
 
@@ -291,7 +301,7 @@ export default function Appointments() {
   }
 
   const openEdit = (item: AppointmentListItem) => {
-    if (item.status === 'completed') return  // locked after POS completion
+    if (item.status === 'completed') return  // locked once service/payment flow starts
     setEditItem(item)
     setForm({
       customerId: item.customerId ?? '',
@@ -327,15 +337,13 @@ export default function Appointments() {
   }
 
   const openStatusModal = (item: AppointmentListItem) => {
-    if (item.status === 'completed') return  // locked — no manual changes after POS completion
+    if (item.status === 'completed') return  // locked once service/payment flow starts
     setStatusModalId(item.id)
     setNewStatus(item.status)
   }
 
   const navigateSchedule = (delta: number) => {
-    const d = new Date(scheduleDate)
-    d.setDate(d.getDate() + delta)
-    setScheduleDate(d.toISOString().slice(0, 10))
+    setScheduleDate(addDaysToISODate(scheduleDate, delta))
   }
 
   const mutError = createMut.error ?? updateMut.error
@@ -455,15 +463,16 @@ export default function Appointments() {
                 <tbody className="divide-y divide-gray-50">
                   {(listData?.items ?? []).map((item) => {
                     const isCompleted = item.status === 'completed'
+                    const isLocked = isCompleted || item.status === 'attended'
                     return (
-                    <tr key={item.id} className={isCompleted ? 'bg-gray-50 opacity-70' : 'hover:bg-gray-50'}>
+                    <tr key={item.id} className={isLocked ? 'bg-gray-50 opacity-70' : 'hover:bg-gray-50'}>
                       <td className="px-5 py-3">
                         <div className="flex items-center gap-2">
-                          <div className={`w-8 h-8 ${isCompleted ? 'bg-gray-400' : 'bg-blue-600'} rounded-full flex items-center justify-center text-white text-xs font-bold flex-shrink-0`}>
+                          <div className={`w-8 h-8 ${isLocked ? 'bg-gray-400' : 'bg-blue-600'} rounded-full flex items-center justify-center text-white text-xs font-bold flex-shrink-0`}>
                             {item.customerName?.[0] ?? '?'}
                           </div>
                           <div>
-                            <p className={`font-medium leading-tight ${isCompleted ? 'text-gray-500' : 'text-gray-900'}`}>{item.customerName}</p>
+                            <p className={`font-medium leading-tight ${isLocked ? 'text-gray-500' : 'text-gray-900'}`}>{item.customerName}</p>
                             {item.customerPhone && (
                               <p className="text-xs text-gray-400">{item.customerPhone}</p>
                             )}
@@ -505,8 +514,8 @@ export default function Appointments() {
                         </div>
                       </td>
                       <td className="px-4 py-3">
-                        {isCompleted ? (
-                          <Badge variant="gray">{STATUS_AR[item.status] ?? item.status}</Badge>
+                        {isLocked ? (
+                          <Badge variant={STATUS_VARIANT[item.status] ?? 'gray'}>{STATUS_AR[item.status] ?? item.status}</Badge>
                         ) : (
                           <button onClick={() => openStatusModal(item)} title="تغيير الحالة">
                             <Badge variant={STATUS_VARIANT[item.status] ?? 'gray'}>
@@ -516,7 +525,7 @@ export default function Appointments() {
                         )}
                       </td>
                       <td className="px-4 py-3">
-                        {!isCompleted && (
+                        {!isLocked && (
                           <button
                             onClick={() => openEdit(item)}
                             className="text-gray-400 hover:text-blue-600 p-1 rounded hover:bg-blue-50 transition-colors"
@@ -666,28 +675,29 @@ export default function Appointments() {
                           </div>
                         )}
 
-                        {[...col.items]
-                          .sort((a, b) => new Date(a.startAt).getTime() - new Date(b.startAt).getTime())
-                          .map((entry) => {
+                        {layoutScheduleEntries(col.items)
+                          .map(({ entry, lane, laneCount }) => {
                             const start = minutesOfDay(entry.startAt)
                             const end = Math.max(start + 30, minutesOfDay(entry.endAt))
                             const top = Math.max(0, ((start - timelineStart) / 60) * TIMELINE_HOUR_HEIGHT)
                             const height = Math.max(48, ((end - start) / 60) * TIMELINE_HOUR_HEIGHT)
-                            const isDone = entry.status === 'completed'
-                            const isInPOS = entry.status === 'confirmed'
-                            const entryColor = isDone ? '#9CA3AF' : apptColor
+                            const isCompleted = entry.status === 'completed'
+                            const isAttended = false
+                            const isCheckedIn = entry.status === 'checked_in' || entry.status === 'confirmed'
+                            const isLocked = isCompleted || isAttended
+                            const entryColor = isLocked ? '#9CA3AF' : apptColor
 
                             return (
                               <button
                                 type="button"
                                 key={entry.id}
-                                onClick={isDone ? undefined : (event) => {
+                                onClick={isLocked ? undefined : (event) => {
                                   event.stopPropagation()
                                   openEditScheduleEntry(entry)
                                 }}
-                                className={`absolute inset-x-3 rounded-lg border p-2 text-start shadow-sm transition-colors
-                                  ${isDone ? 'opacity-60 cursor-default' : 'cursor-pointer'}`}
-                                style={{ top, height, borderColor: entryColor + '60', backgroundColor: entryColor + '18' }}
+                                className={`absolute rounded-lg border p-2 text-start shadow-sm transition-colors
+                                  ${isLocked ? 'opacity-60 cursor-default' : 'cursor-pointer'}`}
+                                style={{ top, height, width: `calc((100% - 24px) / ${laneCount})`, right: `calc(12px + ${lane} * ((100% - 24px) / ${laneCount}))`, borderColor: entryColor + '60', backgroundColor: entryColor + '18' }}
                               >
                                 <div className="mb-1 flex items-center justify-between gap-2">
                                   <span className="text-xs font-semibold" style={{ color: entryColor }}>
@@ -703,22 +713,22 @@ export default function Appointments() {
                                   <span className="truncate">{entry.serviceName}</span>
                                 </div>
 
-                                {isDone ? (
+                                {isCompleted ? (
                                   <div className="mt-2 flex items-center gap-1 border-t border-gray-200 pt-2 text-xs font-semibold text-gray-400">
-                                    <span>✓ مكتمل — تم الدفع</span>
+                                    <span>✓ مكتمل - تم الدفع</span>
                                   </div>
-                                ) : isInPOS ? (
+                                ) : isCheckedIn ? (
                                   <div className="mt-2 flex items-center gap-1 border-t border-green-100 pt-2 text-xs font-semibold text-green-700">
-                                    <span>✓ حضر — يُخدَّم في الكاشير</span>
+                                    <span>✓ تم تسجيل الحضور - في الكاشير</span>
                                   </div>
                                 ) : (
-                                  <div className="mt-2 grid grid-cols-2 gap-2 border-t border-blue-100 pt-2">
+                                  <div className="mt-2 grid grid-cols-3 gap-2 border-t border-blue-100 pt-2">
                                     <button
                                       type="button"
                                       disabled={markArrivalMut.isPending}
                                       onClick={(event) => {
                                         event.stopPropagation()
-                                        markArrivalMut.mutate({ entry, arrived: true })
+                                        markArrivalMut.mutate({ entry, status: 'checked_in' })
                                       }}
                                       className="flex items-center justify-center gap-1 rounded-md bg-green-600 px-2 py-1 text-xs font-semibold text-white hover:bg-green-700 disabled:opacity-50"
                                     >
@@ -729,11 +739,22 @@ export default function Appointments() {
                                       disabled={markArrivalMut.isPending}
                                       onClick={(event) => {
                                         event.stopPropagation()
-                                        markArrivalMut.mutate({ entry, arrived: false })
+                                        markArrivalMut.mutate({ entry, status: 'no_show' })
                                       }}
                                       className="flex items-center justify-center gap-1 rounded-md bg-red-50 border border-red-200 px-2 py-1 text-xs font-semibold text-red-700 hover:bg-red-100 disabled:opacity-50"
                                     >
                                       ✗ لم يحضر
+                                    </button>
+                                    <button
+                                      type="button"
+                                      disabled={markArrivalMut.isPending}
+                                      onClick={(event) => {
+                                        event.stopPropagation()
+                                        markArrivalMut.mutate({ entry, status: 'cancelled' })
+                                      }}
+                                      className="flex items-center justify-center gap-1 rounded-md bg-gray-50 border border-gray-200 px-2 py-1 text-xs font-semibold text-gray-700 hover:bg-gray-100 disabled:opacity-50"
+                                    >
+                                      إلغاء
                                     </button>
                                   </div>
                                 )}
@@ -844,9 +865,7 @@ export default function Appointments() {
               onChange={(e) => {
                 const svc = servicesPage?.items.find(s => s.id === e.target.value)
                 setForm(p => {
-                  const start = p.startAt ? new Date(p.startAt) : new Date()
-                  const end = new Date(start.getTime() + (svc?.durationMin ?? 60) * 60 * 1000)
-                  return { ...p, serviceId: e.target.value, endAt: toLocalDatetimeValue(end.toISOString()) }
+                  return { ...p, serviceId: e.target.value, endAt: addMinutesToDatetimeValue(p.startAt || toDubaiDateTimeValue(), svc?.durationMin ?? 60) }
                 })
               }}
               className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
