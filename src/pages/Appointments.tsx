@@ -291,6 +291,7 @@ export default function Appointments() {
   }
 
   const openEdit = (item: AppointmentListItem) => {
+    if (item.status === 'completed') return  // locked after POS completion
     setEditItem(item)
     setForm({
       customerId: item.customerId ?? '',
