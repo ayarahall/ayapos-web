@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useMemo } from 'react'
+import { useState, useCallback, useEffect, useMemo, useRef } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   ShoppingCart, Search, Plus, Minus, CreditCard, DollarSign,
@@ -20,7 +20,7 @@ import Input from '../components/ui/Input'
 import type { Branch, CartItem, Customer, InvoiceDetail, ProductListItem, ServiceListItem } from '../types'
 import { loadPosSettings } from '../utils/posSettings'
 import { formatDateTime } from '../utils/date'
-import { readPosDraftTabs, removePosDraftTab, writePosDraftTabs, type PosDraftTab } from '../utils/posDrafts'
+import { readPosDraftTabs, removePosDraftTab, writePosDraftTabs, upsertPosDraftTab, type PosDraftTab } from '../utils/posDrafts'
 
 interface SaleCartItem extends CartItem {
   originalUnitPriceCents: number
@@ -112,8 +112,14 @@ export default function POS() {
   const [padBuffer, setPadBuffer] = useState('')
   const [completedInvoice, setCompletedInvoice] = useState<InvoiceDetail | null>(null)
   const [appointmentUpdateFailed, setAppointmentUpdateFailed] = useState(false)
+  const [completedInvoiceLinkedAppointment, setCompletedInvoiceLinkedAppointment] = useState<{ id: string; branchId?: string } | null>(null)
   const [appointmentDrafts, setAppointmentDrafts] = useState<PosDraftTab[]>(() => readPosDraftTabs())
   const [activeAppointmentDraftId, setActiveAppointmentDraftId] = useState(() => readPosDraftTabs()[0]?.id ?? '')
+
+  // Ref so handleCheckout always reads fresh appointment data regardless of closure age
+  const linkedAppointmentRef = useRef<{ appointmentId: string; branchId?: string } | null>(null)
+  // Ref so the storage event handler can read the latest activeAppointmentDraftId without stale closure
+  const activeAppointmentDraftIdRef = useRef(activeAppointmentDraftId)
 
   /* walk-in state */
   const [walkinModalOpen, setWalkinModalOpen] = useState(false)
@@ -159,8 +165,31 @@ export default function POS() {
     setPadBuffer('')
   }, [persistActiveAppointmentDraft])
 
+  // Keep ref in sync so storage handler avoids stale closure
+  useEffect(() => { activeAppointmentDraftIdRef.current = activeAppointmentDraftId }, [activeAppointmentDraftId])
+
+  // Keep linkedAppointmentRef in sync for reliable access inside handleCheckout
   useEffect(() => {
-    const refreshDrafts = () => setAppointmentDrafts(readPosDraftTabs())
+    if (!activeAppointmentDraftId) { linkedAppointmentRef.current = null; return }
+    const draft = readPosDraftTabs().find(d => d.id === activeAppointmentDraftId)
+    linkedAppointmentRef.current = draft?.appointmentId
+      ? { appointmentId: draft.appointmentId, branchId: draft.branchId }
+      : null
+  }, [activeAppointmentDraftId])
+
+  useEffect(() => {
+    const refreshDrafts = () => {
+      const drafts = readPosDraftTabs()
+      setAppointmentDrafts(drafts)
+      // If POS is already mounted and no draft is active, auto-activate the first new draft
+      if (!activeAppointmentDraftIdRef.current && drafts.length > 0) {
+        const first = drafts[0]
+        setActiveAppointmentDraftId(first.id)
+        setCart(toSaleCartItems(first.items))
+        setSelectedCustomerId(first.customerId ?? '')
+        setCustomerSearch(first.customerName ?? '')
+      }
+    }
     window.addEventListener('ayapos:pos-drafts-changed', refreshDrafts)
     window.addEventListener('storage', refreshDrafts)
     return () => {
@@ -621,15 +650,16 @@ export default function POS() {
 
       // Mark linked appointment as completed right after finalization
       let apptFailed = false
-      if (activeAppointmentDraftId) {
-        const currentDraft = readPosDraftTabs().find((d) => d.id === activeAppointmentDraftId)
-        if (currentDraft?.appointmentId) {
-          try {
-            await updateAppointmentStatus(slug, currentDraft.appointmentId, 'completed', currentDraft.branchId)
-          } catch {
-            apptFailed = true
-          }
+      const linked = linkedAppointmentRef.current
+      if (linked?.appointmentId) {
+        setCompletedInvoiceLinkedAppointment({ id: linked.appointmentId, branchId: linked.branchId })
+        try {
+          await updateAppointmentStatus(slug, linked.appointmentId, 'completed', linked.branchId)
+        } catch {
+          apptFailed = true
         }
+      } else {
+        setCompletedInvoiceLinkedAppointment(null)
       }
       setAppointmentUpdateFailed(apptFailed)
 
@@ -1442,13 +1472,41 @@ export default function POS() {
 
       <Modal
         open={!!completedInvoice}
-        onClose={() => { setCompletedInvoice(null); setAppointmentUpdateFailed(false) }}
+        onClose={() => {
+          setCompletedInvoice(null)
+          setAppointmentUpdateFailed(false)
+          setCompletedInvoiceLinkedAppointment(null)
+        }}
         title="ملخص الدفع"
         size="lg"
         footer={
           completedInvoice && (
             <>
-              <Button variant="secondary" onClick={() => setCompletedInvoice(null)}>إغلاق</Button>
+              <Button variant="secondary" onClick={() => {
+                setCompletedInvoice(null)
+                setAppointmentUpdateFailed(false)
+                setCompletedInvoiceLinkedAppointment(null)
+              }}>إغلاق</Button>
+              {appointmentUpdateFailed && completedInvoiceLinkedAppointment && (
+                <Button
+                  variant="secondary"
+                  onClick={async () => {
+                    try {
+                      await updateAppointmentStatus(
+                        slug,
+                        completedInvoiceLinkedAppointment.id,
+                        'completed',
+                        completedInvoiceLinkedAppointment.branchId
+                      )
+                      setAppointmentUpdateFailed(false)
+                      qc.invalidateQueries({ queryKey: ['appointments', slug] })
+                      qc.invalidateQueries({ queryKey: ['appointments-schedule', slug] })
+                    } catch { /* toast shown by client interceptor */ }
+                  }}
+                >
+                  إغلاق الموعد يدوياً
+                </Button>
+              )}
               <Button onClick={() => printInvoice(completedInvoice)}>
                 <Printer size={16} />
                 طباعة الفاتورة

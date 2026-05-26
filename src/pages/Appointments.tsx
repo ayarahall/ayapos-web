@@ -326,6 +326,7 @@ export default function Appointments() {
   }
 
   const openStatusModal = (item: AppointmentListItem) => {
+    if (item.status === 'completed') return  // locked — no manual changes after POS completion
     setStatusModalId(item.id)
     setNewStatus(item.status)
   }
@@ -451,15 +452,17 @@ export default function Appointments() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-50">
-                  {(listData?.items ?? []).map((item) => (
-                    <tr key={item.id} className="hover:bg-gray-50">
+                  {(listData?.items ?? []).map((item) => {
+                    const isCompleted = item.status === 'completed'
+                    return (
+                    <tr key={item.id} className={isCompleted ? 'bg-gray-50 opacity-70' : 'hover:bg-gray-50'}>
                       <td className="px-5 py-3">
                         <div className="flex items-center gap-2">
-                          <div className="w-8 h-8 bg-blue-600 rounded-full flex items-center justify-center text-white text-xs font-bold flex-shrink-0">
+                          <div className={`w-8 h-8 ${isCompleted ? 'bg-gray-400' : 'bg-blue-600'} rounded-full flex items-center justify-center text-white text-xs font-bold flex-shrink-0`}>
                             {item.customerName?.[0] ?? '?'}
                           </div>
                           <div>
-                            <p className="font-medium text-gray-900 leading-tight">{item.customerName}</p>
+                            <p className={`font-medium leading-tight ${isCompleted ? 'text-gray-500' : 'text-gray-900'}`}>{item.customerName}</p>
                             {item.customerPhone && (
                               <p className="text-xs text-gray-400">{item.customerPhone}</p>
                             )}
@@ -501,25 +504,28 @@ export default function Appointments() {
                         </div>
                       </td>
                       <td className="px-4 py-3">
-                        <button
-                          onClick={() => openStatusModal(item)}
-                          title="تغيير الحالة"
-                        >
-                          <Badge variant={STATUS_VARIANT[item.status] ?? 'gray'}>
-                            {STATUS_AR[item.status] ?? item.status}
-                          </Badge>
-                        </button>
+                        {isCompleted ? (
+                          <Badge variant="gray">{STATUS_AR[item.status] ?? item.status}</Badge>
+                        ) : (
+                          <button onClick={() => openStatusModal(item)} title="تغيير الحالة">
+                            <Badge variant={STATUS_VARIANT[item.status] ?? 'gray'}>
+                              {STATUS_AR[item.status] ?? item.status}
+                            </Badge>
+                          </button>
+                        )}
                       </td>
                       <td className="px-4 py-3">
-                        <button
-                          onClick={() => openEdit(item)}
-                          className="text-gray-400 hover:text-blue-600 p-1 rounded hover:bg-blue-50 transition-colors"
-                        >
-                          <Pencil size={15} />
-                        </button>
+                        {!isCompleted && (
+                          <button
+                            onClick={() => openEdit(item)}
+                            className="text-gray-400 hover:text-blue-600 p-1 rounded hover:bg-blue-50 transition-colors"
+                          >
+                            <Pencil size={15} />
+                          </button>
+                        )}
                       </td>
                     </tr>
-                  ))}
+                  )})}
                   {(listData?.items ?? []).length === 0 && (
                     <tr>
                       <td colSpan={6} className="text-center py-14 text-gray-400">
