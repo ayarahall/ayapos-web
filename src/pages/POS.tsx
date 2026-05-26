@@ -10,6 +10,7 @@ import { createCustomer, getCustomers } from '../api/customers'
 import { getTenantBranches } from '../api/auth'
 import { getCurrentSession, openSession, closeSession } from '../api/cashier'
 import { createInvoice, addInvoiceLine, finalizeInvoice, addPayment, getInvoices, getInvoice } from '../api/invoices'
+import { updateAppointmentStatus } from '../api/appointments'
 import { getApiErrorMessage } from '../api/errors'
 import { useAuthStore } from '../store/authStore'
 import Button from '../components/ui/Button'
@@ -237,7 +238,7 @@ export default function POS() {
     }),
     onSuccess: (created) => {
       qc.invalidateQueries({ queryKey: ['customers', slug, branchId ?? 'login-branch'] })
-      setSelectedCustomerId(created.id)
+      setSelectedCustomerId(created)
       setCustomerSearch('')
       setCustomerForm({ fullName: '', phone: '', email: '' })
       setCustomerModalOpen(false)
@@ -518,6 +519,19 @@ export default function POS() {
         })
       }
       await finalizeInvoice(slug, invoiceId)
+
+      // Mark linked appointment as completed right after finalization
+      if (activeAppointmentDraftId) {
+        const currentDraft = readPosDraftTabs().find((d) => d.id === activeAppointmentDraftId)
+        if (currentDraft?.appointmentId) {
+          try {
+            await updateAppointmentStatus(slug, currentDraft.appointmentId, 'completed')
+          } catch {
+            // non-blocking — checkout continues
+          }
+        }
+      }
+
       await addPayment(slug, invoiceId, {
         method: payMethod,
         amountCents: paidCents,
@@ -530,6 +544,8 @@ export default function POS() {
         setAppointmentDrafts(nextDrafts)
         setActiveAppointmentDraftId('')
       }
+      qc.invalidateQueries({ queryKey: ['appointments', slug] })
+      qc.invalidateQueries({ queryKey: ['appointments-schedule', slug] })
       setCart([])
       setPayModal(false)
       setPayAmount('')

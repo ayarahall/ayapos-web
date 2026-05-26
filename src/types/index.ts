@@ -13,6 +13,8 @@ export interface AuthUser {
   tenantId: string
   tenantSlug: string
   scope: 'tenant' | 'platform'
+  permissions: string[]
+  permissionsConfigured: boolean
 }
 
 export interface PagedResult<T> {

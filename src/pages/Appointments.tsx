@@ -11,7 +11,7 @@ import {
   type AppointmentListItem,
   type AppointmentScheduleEntry,
 } from '../api/appointments'
-import { getCustomers } from '../api/customers'
+import { getCustomers, createCustomer } from '../api/customers'
 import { getServices } from '../api/services'
 import { listEmployees } from '../api/employees'
 import { useAuthStore } from '../store/authStore'
@@ -125,6 +125,8 @@ export default function Appointments() {
   const [form, setForm] = useState<ApptForm>(emptyForm())
   const [statusModalId, setStatusModalId] = useState<string | null>(null)
   const [newStatus, setNewStatus] = useState('')
+  const [customerMode, setCustomerMode] = useState<'existing' | 'new'>('existing')
+  const [newCustomerForm, setNewCustomerForm] = useState({ fullName: '', phone: '' })
 
   /* queries */
   const { data: listData, isLoading: listLoading } = useQuery({
@@ -135,12 +137,14 @@ export default function Appointments() {
       q: search || undefined,
     }),
     enabled: !!slug && view === 'list',
+    refetchOnWindowFocus: true,
   })
 
   const { data: scheduleData, isLoading: scheduleLoading } = useQuery({
     queryKey: ['appointments-schedule', slug, branchId ?? 'login-branch', scheduleDate],
     queryFn: () => getSchedule(slug, scheduleDate),
     enabled: !!slug && view === 'schedule',
+    refetchOnWindowFocus: true,
   })
 
   const { data: employees } = useQuery({
@@ -207,7 +211,7 @@ export default function Appointments() {
 
   const markArrivalMut = useMutation({
     mutationFn: async ({ entry, arrived }: { entry: AppointmentScheduleEntry; arrived: boolean }) => {
-      const nextStatus = arrived ? 'completed' : 'no_show'
+      const nextStatus = arrived ? 'confirmed' : 'no_show'
       await updateAppointmentStatus(slug, entry.id, nextStatus)
 
       if (arrived && entry.customerId && entry.serviceId) {
@@ -243,9 +247,15 @@ export default function Appointments() {
   }
 
   /* handlers */
+  const resetCustomerMode = () => {
+    setCustomerMode('existing')
+    setNewCustomerForm({ fullName: '', phone: '' })
+  }
+
   const openCreate = () => {
     setEditItem(null)
     setForm(emptyForm())
+    resetCustomerMode()
     setModalOpen(true)
   }
 
@@ -257,6 +267,7 @@ export default function Appointments() {
       resourceName,
       ...(startAt ? { startAt, endAt: addMinutesToDatetimeValue(startAt, 60) } : {}),
     })
+    resetCustomerMode()
     setModalOpen(true)
   }
 
@@ -274,6 +285,7 @@ export default function Appointments() {
       endAt: toLocalDatetimeValue(entry.endAt),
       notes: entry.notes,
     })
+    resetCustomerMode()
     setModalOpen(true)
   }
 
@@ -287,15 +299,29 @@ export default function Appointments() {
       endAt: toLocalDatetimeValue(item.endAt),
       notes: item.notes,
     })
+    resetCustomerMode()
     setModalOpen(true)
   }
 
-  const closeModal = () => setModalOpen(false)
+  const closeModal = () => { setModalOpen(false); resetCustomerMode() }
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (editItem) updateMut.mutate(form)
-    else createMut.mutate(form)
+    let finalForm = form
+    if (customerMode === 'new') {
+      try {
+        const newCustomerId = await createCustomer(slug, {
+          fullName: newCustomerForm.fullName,
+          phone: newCustomerForm.phone || undefined,
+        })
+        qc.invalidateQueries({ queryKey: ['customers-select', slug] })
+        finalForm = { ...form, customerId: newCustomerId }
+      } catch {
+        return
+      }
+    }
+    if (editItem) updateMut.mutate(finalForm)
+    else createMut.mutate(finalForm)
   }
 
   const openStatusModal = (item: AppointmentListItem) => {
@@ -639,20 +665,24 @@ export default function Appointments() {
                             const end = Math.max(start + 30, minutesOfDay(entry.endAt))
                             const top = Math.max(0, ((start - timelineStart) / 60) * TIMELINE_HOUR_HEIGHT)
                             const height = Math.max(48, ((end - start) / 60) * TIMELINE_HOUR_HEIGHT)
+                            const isDone = entry.status === 'completed'
+                            const isInPOS = entry.status === 'confirmed'
+                            const entryColor = isDone ? '#9CA3AF' : apptColor
 
                             return (
                               <button
                                 type="button"
                                 key={entry.id}
-                                onClick={(event) => {
+                                onClick={isDone ? undefined : (event) => {
                                   event.stopPropagation()
                                   openEditScheduleEntry(entry)
                                 }}
-                                className="absolute inset-x-3 rounded-lg border p-2 text-start shadow-sm transition-colors"
-                                style={{ top, height, borderColor: apptColor + '60', backgroundColor: apptColor + '18' }}
+                                className={`absolute inset-x-3 rounded-lg border p-2 text-start shadow-sm transition-colors
+                                  ${isDone ? 'opacity-60 cursor-default' : 'cursor-pointer'}`}
+                                style={{ top, height, borderColor: entryColor + '60', backgroundColor: entryColor + '18' }}
                               >
                                 <div className="mb-1 flex items-center justify-between gap-2">
-                                  <span className="text-xs font-semibold" style={{ color: apptColor }}>
+                                  <span className="text-xs font-semibold" style={{ color: entryColor }}>
                                     {formatTime(entry.startAt)} - {formatTime(entry.endAt)}
                                   </span>
                                   <Badge variant={STATUS_VARIANT[entry.status] ?? 'gray'}>
@@ -664,42 +694,53 @@ export default function Appointments() {
                                   <Wrench size={12} className="text-purple-500" />
                                   <span className="truncate">{entry.serviceName}</span>
                                 </div>
-                                <div className="mt-2 grid grid-cols-2 gap-2 border-t border-blue-100 pt-2">
-                                  <label
-                                    className="flex items-center justify-center gap-1 rounded-md bg-white/70 px-2 py-1 text-xs font-semibold text-green-700"
-                                    onClick={(event) => event.stopPropagation()}
-                                  >
-                                    <input
-                                      type="checkbox"
-                                      checked={entry.status === 'completed'}
-                                      disabled={markArrivalMut.isPending}
-                                      onChange={(event) => {
-                                        event.stopPropagation()
-                                        if (event.currentTarget.checked) {
-                                          markArrivalMut.mutate({ entry, arrived: true })
-                                        }
-                                      }}
-                                    />
-                                    حضر
-                                  </label>
-                                  <label
-                                    className="flex items-center justify-center gap-1 rounded-md bg-white/70 px-2 py-1 text-xs font-semibold text-red-700"
-                                    onClick={(event) => event.stopPropagation()}
-                                  >
-                                    <input
-                                      type="checkbox"
-                                      checked={entry.status === 'no_show'}
-                                      disabled={markArrivalMut.isPending}
-                                      onChange={(event) => {
-                                        event.stopPropagation()
-                                        if (event.currentTarget.checked) {
-                                          markArrivalMut.mutate({ entry, arrived: false })
-                                        }
-                                      }}
-                                    />
-                                    لم يحضر
-                                  </label>
-                                </div>
+
+                                {isDone ? (
+                                  <div className="mt-2 flex items-center gap-1 border-t border-gray-200 pt-2 text-xs font-semibold text-gray-400">
+                                    <span>✓ مكتمل</span>
+                                  </div>
+                                ) : isInPOS ? (
+                                  <div className="mt-2 flex items-center gap-1 border-t border-blue-100 pt-2 text-xs font-semibold text-blue-600">
+                                    <span>🛒 في الكاشير</span>
+                                  </div>
+                                ) : (
+                                  <div className="mt-2 grid grid-cols-2 gap-2 border-t border-blue-100 pt-2">
+                                    <label
+                                      className="flex items-center justify-center gap-1 rounded-md bg-white/70 px-2 py-1 text-xs font-semibold text-green-700"
+                                      onClick={(event) => event.stopPropagation()}
+                                    >
+                                      <input
+                                        type="checkbox"
+                                        checked={false}
+                                        disabled={markArrivalMut.isPending}
+                                        onChange={(event) => {
+                                          event.stopPropagation()
+                                          if (event.currentTarget.checked) {
+                                            markArrivalMut.mutate({ entry, arrived: true })
+                                          }
+                                        }}
+                                      />
+                                      حضر
+                                    </label>
+                                    <label
+                                      className="flex items-center justify-center gap-1 rounded-md bg-white/70 px-2 py-1 text-xs font-semibold text-red-700"
+                                      onClick={(event) => event.stopPropagation()}
+                                    >
+                                      <input
+                                        type="checkbox"
+                                        checked={entry.status === 'no_show'}
+                                        disabled={markArrivalMut.isPending}
+                                        onChange={(event) => {
+                                          event.stopPropagation()
+                                          if (event.currentTarget.checked) {
+                                            markArrivalMut.mutate({ entry, arrived: false })
+                                          }
+                                        }}
+                                      />
+                                      لم يحضر
+                                    </label>
+                                  </div>
+                                )}
                               </button>
                             )
                           })}
@@ -737,22 +778,63 @@ export default function Appointments() {
         <form id="appt-form" onSubmit={handleSubmit} className="space-y-4">
           {/* Customer */}
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              العميل <span className="text-red-500">*</span>
-            </label>
-            <select
-              required
-              value={form.customerId}
-              onChange={(e) => setForm(p => ({ ...p, customerId: e.target.value }))}
-              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
-            >
-              <option value="">-- اختر العميل --</option>
-              {(customersPage?.items ?? []).filter(c => c.isActive).map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.fullName}{c.phone ? ` - ${c.phone}` : ''}
-                </option>
-              ))}
-            </select>
+            <div className="flex items-center justify-between mb-1">
+              <label className="text-sm font-medium text-gray-700">
+                العميل <span className="text-red-500">*</span>
+              </label>
+              <div className="flex bg-gray-100 rounded-lg p-0.5 text-xs">
+                <button
+                  type="button"
+                  onClick={() => setCustomerMode('existing')}
+                  className={`px-3 py-1 rounded-md font-medium transition-colors
+                    ${customerMode === 'existing' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+                >
+                  اختر من القائمة
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setCustomerMode('new')}
+                  className={`px-3 py-1 rounded-md font-medium transition-colors
+                    ${customerMode === 'new' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+                >
+                  + عميل جديد
+                </button>
+              </div>
+            </div>
+
+            {customerMode === 'existing' ? (
+              <select
+                required
+                value={form.customerId}
+                onChange={(e) => setForm(p => ({ ...p, customerId: e.target.value }))}
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+              >
+                <option value="">-- اختر العميل --</option>
+                {(customersPage?.items ?? []).filter(c => c.isActive).map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.fullName}{c.phone ? ` - ${c.phone}` : ''}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <div className="space-y-2 border border-blue-200 bg-blue-50 rounded-lg p-3">
+                <input
+                  type="text"
+                  required
+                  placeholder="الاسم الكامل *"
+                  value={newCustomerForm.fullName}
+                  onChange={(e) => setNewCustomerForm(p => ({ ...p, fullName: e.target.value }))}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+                />
+                <input
+                  type="tel"
+                  placeholder="رقم الجوال (اختياري)"
+                  value={newCustomerForm.phone}
+                  onChange={(e) => setNewCustomerForm(p => ({ ...p, phone: e.target.value }))}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+                />
+              </div>
+            )}
           </div>
 
           {/* Service */}

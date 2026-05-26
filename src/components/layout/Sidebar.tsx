@@ -9,20 +9,22 @@ import { useAuthStore } from '../../store/authStore'
 import { useT } from '../../i18n/useT'
 import { getTenantBranches } from '../../api/tenantAdmin'
 
+const ADMIN_ROLES = ['OWNER', 'ADMIN', 'TENANT']
+
 const navItems = [
   { to: '/dashboard', icon: LayoutDashboard, key: 'dashboard' },
   { to: '/tenant-admin', icon: LayoutPanelTop, key: 'tenantAdmin', tenantAdminOnly: true },
-  { to: '/pos', icon: ShoppingCart, key: 'pos', tenantOnly: true },
-  { to: '/invoices', icon: FileText, key: 'invoices', tenantOnly: true },
-  { to: '/products', icon: Package, key: 'products', tenantOnly: true, tenantAdminHide: true },
-  { to: '/services', icon: Wrench, key: 'services', tenantOnly: true, tenantAdminHide: true },
-  { to: '/appointments', icon: CalendarDays, key: 'appointments', tenantOnly: true },
-  { to: '/expenses', icon: Receipt, key: 'expenses', tenantOnly: true },
+  { to: '/pos', icon: ShoppingCart, key: 'pos', tenantOnly: true, permissionKey: 'pos' },
+  { to: '/invoices', icon: FileText, key: 'invoices', tenantOnly: true, permissionKey: 'invoices' },
+  { to: '/products', icon: Package, key: 'products', tenantOnly: true, tenantAdminHide: true, permissionKey: 'products' },
+  { to: '/services', icon: Wrench, key: 'services', tenantOnly: true, tenantAdminHide: true, permissionKey: 'services' },
+  { to: '/appointments', icon: CalendarDays, key: 'appointments', tenantOnly: true, permissionKey: 'appointments' },
+  { to: '/expenses', icon: Receipt, key: 'expenses', tenantOnly: true, permissionKey: 'expenses' },
   { to: '/categories', icon: Tag, key: 'categories', tenantOnly: true },
-  { to: '/customers', icon: Users, key: 'customers', tenantOnly: true },
+  { to: '/customers', icon: Users, key: 'customers', tenantOnly: true, permissionKey: 'customers' },
   { to: '/users', icon: UserCog, key: 'users' },
   { to: '/branches', icon: Building2, key: 'branches' },
-  { to: '/reports', icon: BarChart3, key: 'reports', tenantOnly: true },
+  { to: '/reports', icon: BarChart3, key: 'reports', tenantOnly: true, permissionKey: 'reports' },
   { to: '/settings', icon: Settings, key: 'settings' },
 ]
 
@@ -36,10 +38,17 @@ export default function Sidebar() {
     enabled: user?.role === 'TENANT',
   })
 
+  const isAdmin = ADMIN_ROLES.includes(user?.role ?? '')
+  const userPermissions = user?.permissions ?? []
+  const permissionsConfigured = user?.permissionsConfigured ?? false
+
   const visibleItems = navItems.filter((item) => {
     if (item.tenantOnly && user?.scope !== 'tenant') return false
     if (item.tenantAdminOnly && user?.role !== 'TENANT') return false
     if (item.tenantAdminHide && user?.role === 'TENANT') return false
+    if (item.permissionKey && permissionsConfigured && !isAdmin) {
+      if (!userPermissions.includes(item.permissionKey)) return false
+    }
     return true
   })
 

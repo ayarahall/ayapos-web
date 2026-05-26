@@ -67,11 +67,11 @@ export default function Login() {
     try {
       if (tab === 'platform') {
         const res = await loginPlatform({ username: form.username, password: form.password })
-        setAuth(res.token, { username: form.username, role: res.role, tenantId: res.tenantId, tenantSlug: '', scope: 'platform' })
+        setAuth(res.token, { username: form.username, role: res.role, tenantId: res.tenantId, tenantSlug: '', scope: 'platform', permissions: [], permissionsConfigured: false })
         setBranchId(null)
       } else {
         const res = await loginTenant({ tenantSlug: form.tenantSlug.trim(), branchId: form.branchId || undefined, username: form.username, password: form.password })
-        setAuth(res.token, { username: form.username, role: res.role, tenantId: res.tenantId, tenantSlug: form.tenantSlug.trim(), scope: 'tenant' })
+        setAuth(res.token, { username: form.username, role: res.role, tenantId: res.tenantId, tenantSlug: form.tenantSlug.trim(), scope: 'tenant', permissions: res.permissions ?? [], permissionsConfigured: res.permissionsConfigured ?? false })
         setBranchId(form.branchId || res.branchId || getBranchIdFromToken(res.token))
       }
       navigate('/dashboard', { replace: true })

@@ -15,8 +15,8 @@ export async function getCustomers(
 export async function createCustomer(
   tenantSlug: string,
   payload: { fullName: string; phone?: string; email?: string; notes?: string }
-): Promise<{ id: string }> {
-  const res = await client.post<{ id: string }>(`/t/${tenantSlug}/customers`, payload)
+): Promise<string> {
+  const res = await client.post<string>(`/t/${tenantSlug}/customers`, payload)
   return res.data
 }
 
