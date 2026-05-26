@@ -129,19 +129,24 @@ function PosSettingsForm({ activeBranchId }: { activeBranchId: string }) {
         </div>
       )}
 
-      <label className={`flex items-center justify-between gap-3 px-4 py-3 rounded-lg border cursor-pointer transition-colors
-        ${form.requirePaymentReference ? 'bg-blue-50 border-blue-200' : 'border-gray-200 hover:bg-gray-50'}`}>
-        <span className="text-sm font-medium text-gray-700">طلب رقم المرجع عند الدفع بالبطاقة أو التحويل</span>
-        <div className={`relative w-10 h-5 rounded-full transition-colors ${form.requirePaymentReference ? 'bg-blue-600' : 'bg-gray-300'}`}>
-          <div className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${form.requirePaymentReference ? 'translate-x-5' : 'translate-x-0.5'}`} />
-          <input
-            type="checkbox"
-            className="sr-only"
-            checked={form.requirePaymentReference}
-            onChange={e => updateForm({ ...defaultPosSettings, ...form, requirePaymentReference: e.target.checked })}
-          />
-        </div>
-      </label>
+      {([
+        { key: 'requirePaymentReference' as const, label: 'طلب رقم المرجع عند الدفع بالبطاقة أو التحويل' },
+        { key: 'requireAppointment' as const, label: 'لا يُسمح بإصدار فاتورة إلا بعد حجز موعد أو تسجيل حضور' },
+      ]).map(({ key, label }) => (
+        <label key={key} className={`flex items-center justify-between gap-3 px-4 py-3 rounded-lg border cursor-pointer transition-colors
+          ${form[key] ? 'bg-blue-50 border-blue-200' : 'border-gray-200 hover:bg-gray-50'}`}>
+          <span className="text-sm font-medium text-gray-700">{label}</span>
+          <div className={`relative w-10 h-5 rounded-full transition-colors ${form[key] ? 'bg-blue-600' : 'bg-gray-300'}`}>
+            <div className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${form[key] ? 'translate-x-5' : 'translate-x-0.5'}`} />
+            <input
+              type="checkbox"
+              className="sr-only"
+              checked={form[key]}
+              onChange={e => updateForm({ ...form, [key]: e.target.checked })}
+            />
+          </div>
+        </label>
+      ))}
     </div>
   )
 }

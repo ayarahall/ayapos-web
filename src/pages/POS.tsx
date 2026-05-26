@@ -10,7 +10,7 @@ import { createCustomer, getCustomers } from '../api/customers'
 import { getTenantBranches } from '../api/auth'
 import { getCurrentSession, openSession, closeSession } from '../api/cashier'
 import { createInvoice, addInvoiceLine, finalizeInvoice, addPayment, getInvoices, getInvoice } from '../api/invoices'
-import { updateAppointmentStatus } from '../api/appointments'
+import { updateAppointmentStatus, createAppointment, getResources } from '../api/appointments'
 import { getApiErrorMessage } from '../api/errors'
 import { useAuthStore } from '../store/authStore'
 import Button from '../components/ui/Button'
@@ -111,8 +111,17 @@ export default function POS() {
   const [padTarget, setPadTarget] = useState<PadTarget>('qty')
   const [padBuffer, setPadBuffer] = useState('')
   const [completedInvoice, setCompletedInvoice] = useState<InvoiceDetail | null>(null)
+  const [appointmentUpdateFailed, setAppointmentUpdateFailed] = useState(false)
   const [appointmentDrafts, setAppointmentDrafts] = useState<PosDraftTab[]>(() => readPosDraftTabs())
   const [activeAppointmentDraftId, setActiveAppointmentDraftId] = useState(() => readPosDraftTabs()[0]?.id ?? '')
+
+  /* walk-in state */
+  const [walkinModalOpen, setWalkinModalOpen] = useState(false)
+  const [walkinForm, setWalkinForm] = useState({ customerId: '', serviceId: '', resourceName: '' })
+  const [walkinCustomerMode, setWalkinCustomerMode] = useState<'existing' | 'new'>('existing')
+  const [walkinNewCustomer, setWalkinNewCustomer] = useState({ fullName: '', phone: '' })
+  const [walkinLoading, setWalkinLoading] = useState(false)
+  const [walkinError, setWalkinError] = useState('')
 
   const { data: branches = [], isLoading: branchesLoading } = useQuery({
     queryKey: ['tenant-login-branches', slug],
@@ -195,6 +204,18 @@ export default function POS() {
     queryKey: ['invoices', slug, branchId ?? 'login-branch', 'pos-next-code'],
     queryFn: () => getInvoices(slug, { page: 1, pageSize: 1 }),
     enabled: !!slug,
+  })
+
+  const { data: walkinServicesData } = useQuery({
+    queryKey: ['services', slug, branchId ?? 'login-branch', 'walkin'],
+    queryFn: () => getServices(slug, { page: 1, pageSize: 200 }),
+    enabled: !!slug && walkinModalOpen,
+  })
+
+  const { data: walkinResourcesData } = useQuery({
+    queryKey: ['appointment-resources', slug, branchId ?? 'login-branch'],
+    queryFn: () => getResources(slug),
+    enabled: !!slug && walkinModalOpen,
   })
 
   const draftInvoiceNo = useMemo(
@@ -497,6 +518,83 @@ export default function POS() {
     receipt.document.close()
   }
 
+  const openWalkin = () => {
+    setWalkinForm({ customerId: '', serviceId: '', resourceName: '' })
+    setWalkinCustomerMode('existing')
+    setWalkinNewCustomer({ fullName: '', phone: '' })
+    setWalkinError('')
+    setWalkinModalOpen(true)
+  }
+
+  const handleWalkinCheckin = async () => {
+    const svc = (walkinServicesData?.items ?? []).find((s) => s.id === walkinForm.serviceId)
+    if (!svc) { setWalkinError('الرجاء اختيار الخدمة'); return }
+
+    let customerId = walkinForm.customerId
+    if (walkinCustomerMode === 'new') {
+      if (!walkinNewCustomer.fullName.trim()) { setWalkinError('اسم العميل مطلوب'); return }
+      try {
+        customerId = await createCustomer(slug, {
+          fullName: walkinNewCustomer.fullName,
+          phone: walkinNewCustomer.phone || undefined,
+        })
+        qc.invalidateQueries({ queryKey: ['customers', slug, branchId ?? 'login-branch'] })
+      } catch { return }
+    }
+    if (!customerId) { setWalkinError('الرجاء اختيار العميل'); return }
+
+    setWalkinLoading(true)
+    setWalkinError('')
+    try {
+      const now = new Date()
+      const end = new Date(now.getTime() + (svc.durationMin ?? 60) * 60 * 1000)
+      const appointmentId = await createAppointment(slug, {
+        customerId,
+        serviceId: walkinForm.serviceId,
+        startAt: now.toISOString(),
+        endAt: end.toISOString(),
+        resourceName: walkinForm.resourceName || undefined,
+      })
+      await updateAppointmentStatus(slug, appointmentId, 'confirmed')
+
+      const customerName =
+        walkinCustomerMode === 'new'
+          ? walkinNewCustomer.fullName
+          : (customersData?.items ?? []).find((c) => c.id === customerId)?.fullName ?? 'عميل'
+      const draftId = `appointment:${appointmentId}`
+      const priceCents = svc.priceCents
+      const serviceItem: CartItem = {
+        itemId: svc.id,
+        itemType: 'Service',
+        nameAr: svc.nameAr ?? svc.nameEn ?? 'خدمة',
+        nameEn: svc.nameEn ?? '',
+        qty: 1,
+        unitPriceCents: priceCents,
+      }
+      persistActiveAppointmentDraft()
+      upsertPosDraftTab({
+        id: draftId,
+        appointmentId,
+        customerId,
+        customerName,
+        label: customerName,
+        items: [serviceItem],
+      })
+      setAppointmentDrafts(readPosDraftTabs())
+      setActiveAppointmentDraftId(draftId)
+      setCart(toSaleCartItems([serviceItem]))
+      setSelectedCustomerId(customerId)
+      setCustomerSearch(customerName)
+      qc.invalidateQueries({ queryKey: ['appointments', slug] })
+      qc.invalidateQueries({ queryKey: ['appointments-schedule', slug] })
+      setWalkinModalOpen(false)
+    } catch {
+      setWalkinError('حدث خطأ، يرجى المحاولة مرة أخرى')
+    } finally {
+      setWalkinLoading(false)
+    }
+  }
+
   const handleCheckout = useCallback(async () => {
     if (cart.length === 0 || paidCents <= 0) return
     if (posSettings.requirePaymentReference && (payMethod === 1 || payMethod === 2) && !payRef.trim()) {
@@ -521,16 +619,18 @@ export default function POS() {
       await finalizeInvoice(slug, invoiceId)
 
       // Mark linked appointment as completed right after finalization
+      let apptFailed = false
       if (activeAppointmentDraftId) {
         const currentDraft = readPosDraftTabs().find((d) => d.id === activeAppointmentDraftId)
         if (currentDraft?.appointmentId) {
           try {
             await updateAppointmentStatus(slug, currentDraft.appointmentId, 'completed')
           } catch {
-            // non-blocking — checkout continues
+            apptFailed = true
           }
         }
       }
+      setAppointmentUpdateFailed(apptFailed)
 
       await addPayment(slug, invoiceId, {
         method: payMethod,
@@ -673,9 +773,19 @@ export default function POS() {
       </div>
 
       <div className="w-full xl:w-[26rem] flex flex-col bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
-        {appointmentDrafts.length > 0 && (
-          <div className="border-b border-blue-100 bg-blue-50/70 px-3 py-2">
-            <p className="mb-2 text-xs font-bold text-blue-700">فواتير المواعيد الحاضرة</p>
+        <div className="border-b border-blue-100 bg-blue-50/70 px-3 py-2">
+          <div className="flex items-center justify-between mb-2">
+            <p className="text-xs font-bold text-blue-700">المواعيد الحاضرة</p>
+            <button
+              type="button"
+              onClick={openWalkin}
+              className="flex items-center gap-1 rounded-lg border border-blue-300 bg-white px-2 py-1 text-xs font-semibold text-blue-700 hover:bg-blue-100 transition-colors"
+            >
+              <Plus size={12} />
+              حضور مباشر
+            </button>
+          </div>
+          {appointmentDrafts.length > 0 ? (
             <div className="flex gap-2 overflow-x-auto pb-1">
               {appointmentDrafts.map((draft) => (
                 <button
@@ -692,8 +802,15 @@ export default function POS() {
                 </button>
               ))}
             </div>
-          </div>
-        )}
+          ) : (
+            <p className="text-xs text-blue-500">لا توجد مواعيد حاضرة — سجّل حضور مباشر أو انتقل إلى المواعيد</p>
+          )}
+          {posSettings.requireAppointment && !activeAppointmentDraftId && (
+            <div className="mt-2 rounded-lg bg-amber-50 border border-amber-200 px-3 py-2 text-xs text-amber-700 font-medium">
+              لا يمكن إصدار فاتورة بدون موعد مفتوح — سجّل حضور مباشر أولاً
+            </div>
+          )}
+        </div>
 
         {!session ? (
           <div className="p-4 bg-amber-50 border-b border-amber-200">
@@ -962,7 +1079,7 @@ export default function POS() {
                   <span className="text-xl font-bold text-gray-900">{fmt(total)} <span className="text-sm">د.إ</span></span>
                 </div>
                 <button
-                  disabled={cart.length === 0 || !session}
+                  disabled={cart.length === 0 || !session || (posSettings.requireAppointment && !activeAppointmentDraftId)}
                   onClick={() => { setPayAmount(toMoney(total)); setPayModal(true) }}
                   className="w-full bg-blue-600 text-white font-semibold py-3 rounded-xl hover:bg-blue-700
                     disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-2 transition-colors"
@@ -1154,6 +1271,117 @@ export default function POS() {
         </div>
       </Modal>
 
+      <Modal
+        open={walkinModalOpen}
+        onClose={() => setWalkinModalOpen(false)}
+        title="تسجيل حضور مباشر"
+        size="lg"
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setWalkinModalOpen(false)}>إلغاء</Button>
+            <Button
+              onClick={handleWalkinCheckin}
+              loading={walkinLoading}
+              disabled={!walkinForm.serviceId || (walkinCustomerMode === 'existing' ? !walkinForm.customerId : !walkinNewCustomer.fullName.trim())}
+            >
+              تسجيل الحضور وفتح تاب
+            </Button>
+          </>
+        }
+      >
+        <div className="space-y-4">
+          {/* Customer */}
+          <div>
+            <div className="flex items-center justify-between mb-1">
+              <label className="text-sm font-medium text-gray-700">العميل <span className="text-red-500">*</span></label>
+              <div className="flex bg-gray-100 rounded-lg p-0.5 text-xs">
+                <button type="button" onClick={() => setWalkinCustomerMode('existing')}
+                  className={`px-3 py-1 rounded-md font-medium transition-colors
+                    ${walkinCustomerMode === 'existing' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
+                  اختر من القائمة
+                </button>
+                <button type="button" onClick={() => setWalkinCustomerMode('new')}
+                  className={`px-3 py-1 rounded-md font-medium transition-colors
+                    ${walkinCustomerMode === 'new' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
+                  + عميل جديد
+                </button>
+              </div>
+            </div>
+            {walkinCustomerMode === 'existing' ? (
+              <select
+                value={walkinForm.customerId}
+                onChange={(e) => setWalkinForm((p) => ({ ...p, customerId: e.target.value }))}
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                <option value="">-- اختر العميل --</option>
+                {(customersData?.items ?? []).filter((c) => c.isActive).map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.fullName}{c.phone ? ` - ${c.phone}` : ''}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <div className="space-y-2 border border-blue-200 bg-blue-50 rounded-lg p-3">
+                <input
+                  type="text"
+                  placeholder="الاسم الكامل *"
+                  value={walkinNewCustomer.fullName}
+                  onChange={(e) => setWalkinNewCustomer((p) => ({ ...p, fullName: e.target.value }))}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+                <input
+                  type="tel"
+                  placeholder="رقم الجوال (اختياري)"
+                  value={walkinNewCustomer.phone}
+                  onChange={(e) => setWalkinNewCustomer((p) => ({ ...p, phone: e.target.value }))}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+            )}
+          </div>
+
+          {/* Service */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">الخدمة <span className="text-red-500">*</span></label>
+            <select
+              value={walkinForm.serviceId}
+              onChange={(e) => setWalkinForm((p) => ({ ...p, serviceId: e.target.value }))}
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+            >
+              <option value="">-- اختر الخدمة --</option>
+              {(walkinServicesData?.items ?? []).filter((s) => s.isActive).map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.nameAr ?? s.nameEn}{s.durationMin ? ` (${s.durationMin} دقيقة)` : ''} - {s.price.toFixed(2)}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* Resource */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">الموظف المسؤول (اختياري)</label>
+            <select
+              value={walkinForm.resourceName}
+              onChange={(e) => setWalkinForm((p) => ({ ...p, resourceName: e.target.value }))}
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+            >
+              <option value="">-- غير محدد --</option>
+              {(walkinResourcesData ?? []).map((r) => (
+                <option key={r.userId} value={r.username}>
+                  {r.username}{r.role ? ` - ${r.role}` : ''}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {walkinError && (
+            <div className="bg-red-50 border border-red-200 rounded-lg px-4 py-3 text-sm text-red-700">
+              {walkinError}
+            </div>
+          )}
+        </div>
+      </Modal>
+
       <Modal open={payModal} onClose={() => setPayModal(false)} title="إتمام الدفع" size="lg"
         footer={
           <>
@@ -1213,7 +1441,7 @@ export default function POS() {
 
       <Modal
         open={!!completedInvoice}
-        onClose={() => setCompletedInvoice(null)}
+        onClose={() => { setCompletedInvoice(null); setAppointmentUpdateFailed(false) }}
         title="ملخص الدفع"
         size="lg"
         footer={
@@ -1230,6 +1458,11 @@ export default function POS() {
       >
         {completedInvoice && (
           <div className="space-y-4">
+            {appointmentUpdateFailed && (
+              <div className="rounded-xl bg-amber-50 border border-amber-200 px-4 py-3 text-sm text-amber-800">
+                تم إصدار الفاتورة، لكن تعذر تحديث حالة الموعد تلقائياً — يرجى تحديثه يدوياً من صفحة المواعيد
+              </div>
+            )}
             <div className="rounded-xl bg-green-50 border border-green-200 px-4 py-3">
               <p className="text-sm font-semibold text-green-800">تم الدفع بنجاح</p>
               <p className="mt-1 font-mono text-lg font-bold text-gray-900">{completedInvoice.invoiceCode}</p>

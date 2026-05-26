@@ -1,9 +1,11 @@
 export interface PosSettings {
   requirePaymentReference: boolean
+  requireAppointment: boolean
 }
 
 export const defaultPosSettings: PosSettings = {
   requirePaymentReference: false,
+  requireAppointment: false,
 }
 
 export const getPosSettingsKey = (branchId?: string | null) =>
