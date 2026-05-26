@@ -26,8 +26,8 @@ import { upsertPosDraftTab } from '../utils/posDrafts'
 /* helpers */
 
 const STATUS_AR: Record<string, string> = {
-  scheduled: 'مجدول',
-  confirmed: 'مؤكد',
+  scheduled: 'محجوز',
+  confirmed: 'حضر',
   completed: 'مكتمل',
   cancelled: 'ملغي',
   no_show: 'لم يحضر',
@@ -705,48 +705,36 @@ export default function Appointments() {
 
                                 {isDone ? (
                                   <div className="mt-2 flex items-center gap-1 border-t border-gray-200 pt-2 text-xs font-semibold text-gray-400">
-                                    <span>✓ مكتمل</span>
+                                    <span>✓ مكتمل — تم الدفع</span>
                                   </div>
                                 ) : isInPOS ? (
-                                  <div className="mt-2 flex items-center gap-1 border-t border-blue-100 pt-2 text-xs font-semibold text-blue-600">
-                                    <span>🛒 في الكاشير</span>
+                                  <div className="mt-2 flex items-center gap-1 border-t border-green-100 pt-2 text-xs font-semibold text-green-700">
+                                    <span>✓ حضر — يُخدَّم في الكاشير</span>
                                   </div>
                                 ) : (
                                   <div className="mt-2 grid grid-cols-2 gap-2 border-t border-blue-100 pt-2">
-                                    <label
-                                      className="flex items-center justify-center gap-1 rounded-md bg-white/70 px-2 py-1 text-xs font-semibold text-green-700"
-                                      onClick={(event) => event.stopPropagation()}
+                                    <button
+                                      type="button"
+                                      disabled={markArrivalMut.isPending}
+                                      onClick={(event) => {
+                                        event.stopPropagation()
+                                        markArrivalMut.mutate({ entry, arrived: true })
+                                      }}
+                                      className="flex items-center justify-center gap-1 rounded-md bg-green-600 px-2 py-1 text-xs font-semibold text-white hover:bg-green-700 disabled:opacity-50"
                                     >
-                                      <input
-                                        type="checkbox"
-                                        checked={false}
-                                        disabled={markArrivalMut.isPending}
-                                        onChange={(event) => {
-                                          event.stopPropagation()
-                                          if (event.currentTarget.checked) {
-                                            markArrivalMut.mutate({ entry, arrived: true })
-                                          }
-                                        }}
-                                      />
-                                      حضر
-                                    </label>
-                                    <label
-                                      className="flex items-center justify-center gap-1 rounded-md bg-white/70 px-2 py-1 text-xs font-semibold text-red-700"
-                                      onClick={(event) => event.stopPropagation()}
+                                      ✓ سجّل الحضور
+                                    </button>
+                                    <button
+                                      type="button"
+                                      disabled={markArrivalMut.isPending}
+                                      onClick={(event) => {
+                                        event.stopPropagation()
+                                        markArrivalMut.mutate({ entry, arrived: false })
+                                      }}
+                                      className="flex items-center justify-center gap-1 rounded-md bg-red-50 border border-red-200 px-2 py-1 text-xs font-semibold text-red-700 hover:bg-red-100 disabled:opacity-50"
                                     >
-                                      <input
-                                        type="checkbox"
-                                        checked={entry.status === 'no_show'}
-                                        disabled={markArrivalMut.isPending}
-                                        onChange={(event) => {
-                                          event.stopPropagation()
-                                          if (event.currentTarget.checked) {
-                                            markArrivalMut.mutate({ entry, arrived: false })
-                                          }
-                                        }}
-                                      />
-                                      لم يحضر
-                                    </label>
+                                      ✗ لم يحضر
+                                    </button>
                                   </div>
                                 )}
                               </button>
