@@ -3,6 +3,7 @@ import type { CartItem } from '../types'
 export interface PosDraftTab {
   id: string
   appointmentId?: string
+  branchId?: string
   customerId?: string
   customerName?: string
   label: string

@@ -10,7 +10,10 @@ const client = axios.create({
 client.interceptors.request.use((config) => {
   const { token, branchId } = useAuthStore.getState()
   if (token) config.headers.Authorization = `Bearer ${token}`
-  if (branchId) config.headers['X-Branch-Id'] = branchId
+  // Only inject X-Branch-Id if the caller hasn't already set one explicitly
+  if (branchId && !config.headers['X-Branch-Id']) {
+    config.headers['X-Branch-Id'] = branchId
+  }
   return config
 })
 

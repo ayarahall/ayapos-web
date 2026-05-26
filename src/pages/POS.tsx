@@ -575,6 +575,7 @@ export default function POS() {
       upsertPosDraftTab({
         id: draftId,
         appointmentId,
+        branchId: branchId ?? undefined,
         customerId,
         customerName,
         label: customerName,
@@ -624,7 +625,7 @@ export default function POS() {
         const currentDraft = readPosDraftTabs().find((d) => d.id === activeAppointmentDraftId)
         if (currentDraft?.appointmentId) {
           try {
-            await updateAppointmentStatus(slug, currentDraft.appointmentId, 'completed')
+            await updateAppointmentStatus(slug, currentDraft.appointmentId, 'completed', currentDraft.branchId)
           } catch {
             apptFailed = true
           }

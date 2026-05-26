@@ -219,6 +219,7 @@ export default function Appointments() {
         upsertPosDraftTab({
           id: `appointment:${entry.id}`,
           appointmentId: entry.id,
+          branchId: branchId ?? undefined,
           customerId: entry.customerId,
           customerName: entry.customerName,
           label: entry.customerName || 'عميل موعد',

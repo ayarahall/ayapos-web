@@ -106,11 +106,13 @@ export async function createAppointment(
 export async function updateAppointmentStatus(
   tenantSlug: string,
   appointmentId: string,
-  status: string
+  status: string,
+  branchIdOverride?: string
 ): Promise<AppointmentListItem> {
   const res = await client.post<AppointmentListItem>(
     `/t/${tenantSlug}/appointments/${appointmentId}/status`,
-    { status }
+    { status },
+    branchIdOverride ? { headers: { 'X-Branch-Id': branchIdOverride } } : undefined
   )
   return res.data
 }
