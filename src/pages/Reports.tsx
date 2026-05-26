@@ -1,6 +1,6 @@
 import { useState, useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { BarChart3, TrendingUp, DollarSign, CreditCard, ShoppingBag, Building2, CalendarCheck, Users, ChevronLeft, ChevronRight } from 'lucide-react'
+import { BarChart3, TrendingUp, DollarSign, CreditCard, ShoppingBag, Building2, CalendarCheck, ChevronLeft, ChevronRight } from 'lucide-react'
 import { getDailySummary, getSessions } from '../api/cashier'
 import { getInvoices } from '../api/invoices'
 import { getAppointments } from '../api/appointments'
@@ -17,12 +17,6 @@ const fmt = (cents: number) =>
 const fmtN = (n: number) => new Intl.NumberFormat('ar-AE').format(n)
 
 type RangePreset = 'today' | 'week' | 'month' | 'custom'
-
-function addDays(iso: string, days: number) {
-  const d = new Date(iso + 'T00:00:00')
-  d.setDate(d.getDate() + days)
-  return d.toISOString().slice(0, 10)
-}
 
 function startOfWeek(iso: string) {
   const d = new Date(iso + 'T00:00:00')
@@ -41,11 +35,6 @@ const payMethodLabel = (method: number | string) => {
   if (method === 3 || method === 'Transfer' || method === 'BankTransfer') return 'تحويل'
   return String(method)
 }
-
-const sessionStatusVariant = (s: CashierSession) =>
-  s.isClosed ? 'gray' as const : 'green' as const
-
-import type { CashierSession } from '../types'
 
 export default function Reports() {
   const { user, branchId } = useAuthStore()
