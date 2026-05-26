@@ -60,10 +60,13 @@ export default function Inbox() {
     select: (d) => d.items.filter((e) => e.status === 'submitted'),
   })
 
-  /* All today's appointments, sorted by time */
-  const todayAppointments = (apptPage?.items ?? []).sort(
-    (a, b) => new Date(a.startAt).getTime() - new Date(b.startAt).getTime()
-  )
+  const isManager = CAN_APPROVE_EXPENSES.has(user?.role ?? '')
+  const myUsername = user?.username?.trim().toLowerCase() ?? ''
+
+  /* Managers/admins see all; everyone else sees only their own */
+  const todayAppointments = (apptPage?.items ?? [])
+    .filter((a) => isManager || !a.resourceName || a.resourceName.trim().toLowerCase() === myUsername)
+    .sort((a, b) => new Date(a.startAt).getTime() - new Date(b.startAt).getTime())
 
   const pendingExpCount = submittedExpenses?.length ?? 0
 
@@ -140,8 +143,8 @@ export default function Inbox() {
           ) : todayAppointments.length === 0 ? (
             <div className="text-center py-16">
               <CalendarDays size={40} className="mx-auto mb-3 text-gray-200" />
-              <p className="text-gray-500 font-medium">لا توجد مواعيد اليوم</p>
-              <p className="text-gray-400 text-sm mt-1">ستظهر هنا مواعيد اليوم بمجرد حجزها</p>
+              <p className="text-gray-500 font-medium">لا توجد مواعيد مسجلة باسمك اليوم</p>
+              <p className="text-gray-400 text-sm mt-1">ستظهر هنا مواعيدك عندما يتم حجزها تحت اسم ({user?.username})</p>
             </div>
           ) : (
             <div className="divide-y divide-gray-50">
