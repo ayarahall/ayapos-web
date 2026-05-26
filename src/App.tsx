@@ -18,6 +18,7 @@ import Expenses from './pages/Expenses'
 import Reports from './pages/Reports'
 import Settings from './pages/Settings'
 import TenantAdmin from './pages/TenantAdmin'
+import Inbox from './pages/Inbox'
 
 const ADMIN_ROLES = new Set(['OWNER', 'ADMIN', 'TENANT'])
 
@@ -179,6 +180,7 @@ export default function App() {
           />
           <Route path="categories" element={<Categories />} />
           <Route path="tenant-admin" element={<TenantAdmin />} />
+          <Route path="inbox" element={<Inbox />} />
         </Route>
         <Route path="*" element={<Navigate to="/dashboard" replace />} />
       </Routes>

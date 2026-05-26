@@ -2,12 +2,15 @@ import { NavLink } from 'react-router-dom'
 import {
   LayoutDashboard, ShoppingCart, FileText, Package, Wrench,
   CalendarDays, Receipt, Tag, Users, UserCog, Building2,
-  BarChart3, Settings, LogOut, Store, LayoutPanelTop,
+  BarChart3, Settings, LogOut, Store, LayoutPanelTop, Bell,
 } from 'lucide-react'
 import { useQuery } from '@tanstack/react-query'
 import { useAuthStore } from '../../store/authStore'
 import { useT } from '../../i18n/useT'
 import { getTenantBranches } from '../../api/tenantAdmin'
+import { getAppointments } from '../../api/appointments'
+import { getExpenses } from '../../api/expenses'
+import { dateRangeForDubaiDay, todayInDubaiISO } from '../../utils/date'
 
 const ADMIN_ROLES = ['OWNER', 'ADMIN', 'TENANT']
 
@@ -25,8 +28,11 @@ const navItems = [
   { to: '/users', icon: UserCog, key: 'users', permissionKey: 'users' },
   { to: '/branches', icon: Building2, key: 'branches', permissionKey: 'branches' },
   { to: '/reports', icon: BarChart3, key: 'reports', tenantOnly: true, permissionKey: 'reports' },
+  { to: '/inbox', icon: Bell, key: 'inbox', tenantOnly: true },
   { to: '/settings', icon: Settings, key: 'settings' },
 ]
+
+const CAN_APPROVE_EXPENSES = new Set(['OWNER', 'ADMIN', 'TENANT', 'BRANCH_MANAGER', 'HR'])
 
 export default function Sidebar() {
   const { user, branchId, setBranchId, logout } = useAuthStore()
@@ -37,6 +43,33 @@ export default function Sidebar() {
     queryFn: getTenantBranches,
     enabled: user?.role === 'TENANT',
   })
+
+  const slug = user?.tenantSlug ?? ''
+  const today = todayInDubaiISO()
+  const { dateFrom, dateTo } = dateRangeForDubaiDay(today)
+  const isAdminRole = user?.role === 'OWNER' || user?.role === 'ADMIN' || user?.role === 'TENANT'
+  const canApproveExpenses = CAN_APPROVE_EXPENSES.has(user?.role ?? '')
+
+  const { data: apptPage } = useQuery({
+    queryKey: ['appointments', slug, branchId ?? 'login-branch', 'inbox-today', dateFrom, dateTo],
+    queryFn: () => getAppointments(slug, { page: 1, pageSize: 100, dateFrom, dateTo }),
+    enabled: !!slug && user?.scope === 'tenant',
+    staleTime: 30_000,
+  })
+
+  const { data: submittedExpenses } = useQuery({
+    queryKey: ['expenses', slug, branchId ?? 'login-branch', 'inbox-submitted'],
+    queryFn: () => getExpenses(slug, { page: 1, pageSize: 50 }),
+    enabled: !!slug && canApproveExpenses,
+    staleTime: 30_000,
+    select: (d) => d.items.filter((e) => e.status === 'submitted'),
+  })
+
+  const myPendingAppts = (apptPage?.items ?? []).filter(
+    (a) => a.status === 'scheduled' && (isAdminRole || !a.resourceName || a.resourceName === user?.username)
+  ).length
+  const pendingExpenses = submittedExpenses?.length ?? 0
+  const inboxBadge = myPendingAppts + pendingExpenses
 
   const isAdmin = ADMIN_ROLES.includes(user?.role ?? '')
   const userPermissions = user?.permissions ?? []
@@ -114,7 +147,12 @@ export default function Sidebar() {
             }
           >
             <Icon size={18} />
-            {t.nav[key as keyof typeof t.nav]}
+            <span className="flex-1">{t.nav[key as keyof typeof t.nav]}</span>
+            {key === 'inbox' && inboxBadge > 0 && (
+              <span className="bg-red-500 text-white text-xs rounded-full min-w-[20px] h-5 px-1 flex items-center justify-center font-bold">
+                {inboxBadge > 9 ? '9+' : inboxBadge}
+              </span>
+            )}
           </NavLink>
         ))}
       </nav>

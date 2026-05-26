@@ -23,6 +23,7 @@ const ar = {
     settings: 'الإعدادات', logout: 'تسجيل الخروج',
     tenant: 'المستأجر', tenantAdmin: 'إدارة الفروع',
     activeBranch: 'الفرع النشط', noBranchSelected: '-- اختر فرعاً --',
+    inbox: 'الصندوق الوارد',
   },
   login: {
     title: 'نظام نقطة البيع',
