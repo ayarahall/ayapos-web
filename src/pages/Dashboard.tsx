@@ -4,11 +4,12 @@ import { useQuery } from '@tanstack/react-query'
 import {
   CalendarCheck, CheckCircle2, Clock, ShoppingCart, DollarSign,
   TrendingUp, AlertCircle, Package, Settings, ChevronUp, ChevronDown,
-  ArrowRight,
+  ArrowRight, Receipt,
 } from 'lucide-react'
 import { getDailySummary, getCurrentSession } from '../api/cashier'
 import { getInvoices } from '../api/invoices'
 import { getAppointments, type AppointmentListItem } from '../api/appointments'
+import { getExpenses, type Expense } from '../api/expenses'
 import { useAuthStore } from '../store/authStore'
 import { useLangStore } from '../store/langStore'
 import { useT } from '../i18n/useT'
@@ -37,7 +38,7 @@ const isPastAppointment = (endAt: string) => new Date(endAt).getTime() < Date.no
 
 // ─── Widget config (localStorage) ────────────────────────────────────────────
 
-type WidgetId = 'stats' | 'appt-chart' | 'appt-live' | 'invoices-recent' | 'open-pos' | 'top-items' | 'daily-tasks'
+type WidgetId = 'stats' | 'appt-chart' | 'appt-live' | 'invoices-recent' | 'open-pos' | 'top-items' | 'daily-tasks' | 'expenses-pending'
 
 interface WidgetConfig {
   id: WidgetId
@@ -47,8 +48,9 @@ interface WidgetConfig {
 const DEFAULT_WIDGETS: WidgetConfig[] = [
   { id: 'stats', visible: true },
   { id: 'appt-chart', visible: true },
-  { id: 'appt-live', visible: true },
   { id: 'invoices-recent', visible: true },
+  { id: 'appt-live', visible: true },
+  { id: 'expenses-pending', visible: true },
   { id: 'open-pos', visible: true },
   { id: 'top-items', visible: true },
   { id: 'daily-tasks', visible: true },
@@ -59,6 +61,7 @@ const WIDGET_LABELS: Record<WidgetId, string> = {
   'appt-chart': 'مواعيد اليوم — رسم بياني',
   'appt-live': 'مواعيد اليوم — الحالة الحية',
   'invoices-recent': 'الفواتير الأخيرة',
+  'expenses-pending': 'المصاريف — بانتظار الاعتماد',
   'open-pos': 'فواتير مفتوحة',
   'top-items': 'الأكثر مبيعاً',
   'daily-tasks': 'مهام اليوم',
@@ -185,7 +188,7 @@ function ApptBarChart({ bars }: { bars: ChartBar[] }) {
   const [tooltip, setTooltip] = useState<{ bar: ChartBar; x: number; y: number } | null>(null)
 
   const maxCount = Math.max(...bars.map((b) => b.count), 1)
-  const chartH = 120
+  const chartH = 80
   const barW = 40
   const gap = 20
   const paddingLeft = 10
@@ -397,6 +400,13 @@ export default function Dashboard() {
     refetchInterval: 30_000,
   })
 
+  const { data: submittedExpenses } = useQuery({
+    queryKey: ['expenses', slug, branchId ?? 'login-branch', 'submitted-dashboard'],
+    queryFn: () => getExpenses(slug, { page: 1, pageSize: 10 }),
+    enabled: !!slug,
+    select: (d) => d.items.filter((e: Expense) => e.status === 'submitted' || e.status === 'draft'),
+  })
+
   const hour = new Date().getHours()
   const greeting = hour < 12 ? t.dashboard.goodMorning : hour < 17 ? t.dashboard.goodAfternoon : t.dashboard.goodEvening
 
@@ -531,20 +541,20 @@ export default function Dashboard() {
         )
       )}
 
-      {/* SVG bar chart widget */}
-      {isVisible('appt-chart') && (
-        <Card title="مواعيد اليوم — رسم بياني">
-          {appointmentsLoading ? (
-            <div className="flex justify-center py-8"><Spinner size="md" className="text-blue-600" /></div>
-          ) : (
-            <div className="px-5 py-4">
-              <ApptBarChart bars={chartBars} />
-            </div>
-          )}
-        </Card>
-      )}
-
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        {/* Bar chart widget */}
+        {isVisible('appt-chart') && (
+          <Card title="مواعيد اليوم — رسم بياني">
+            {appointmentsLoading ? (
+              <div className="flex justify-center py-8"><Spinner size="md" className="text-blue-600" /></div>
+            ) : (
+              <div className="px-4 py-3">
+                <ApptBarChart bars={chartBars} />
+              </div>
+            )}
+          </Card>
+        )}
+
         {/* Recent invoices widget */}
         {isVisible('invoices-recent') && (
           <Card className="lg:col-span-2" title={t.dashboard.recentInvoices}>
@@ -611,6 +621,40 @@ export default function Dashboard() {
               </div>
             ) : (
               <p className="py-8 text-center text-sm text-gray-400">{lang === 'ar' ? 'لا توجد فواتير مفتوحة' : 'No open invoices'}</p>
+            )}
+          </Card>
+        )}
+
+        {/* Expenses pending approval widget */}
+        {isVisible('expenses-pending') && (
+          <Card title={lang === 'ar' ? 'مصاريف بانتظار الاعتماد' : 'Expenses Pending Approval'}>
+            {(submittedExpenses?.length ?? 0) === 0 ? (
+              <p className="py-8 text-center text-sm text-gray-400">
+                {lang === 'ar' ? 'لا توجد مصاريف معلقة' : 'No pending expenses'}
+              </p>
+            ) : (
+              <div className="divide-y divide-gray-50">
+                {submittedExpenses!.map((exp) => (
+                  <div key={exp.id} className="flex items-center justify-between px-5 py-3 gap-3">
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-medium text-gray-900 truncate">{exp.title}</p>
+                      <p className="text-xs text-gray-500 mt-0.5">{exp.category}</p>
+                    </div>
+                    <div className="text-end flex-shrink-0">
+                      <p className="text-sm font-bold text-gray-900">{exp.amount.toFixed(2)} {exp.currencyCode}</p>
+                      <span className={`text-xs font-medium ${exp.status === 'submitted' ? 'text-blue-600' : 'text-gray-500'}`}>
+                        {exp.status === 'submitted' ? (lang === 'ar' ? 'مقدمة' : 'Submitted') : (lang === 'ar' ? 'مسودة' : 'Draft')}
+                      </span>
+                    </div>
+                  </div>
+                ))}
+                <div className="px-5 py-3 bg-gray-50 border-t border-gray-100 flex items-center gap-2">
+                  <Receipt size={14} className="text-orange-500" />
+                  <span className="text-xs text-gray-600 font-medium">
+                    {submittedExpenses!.length} {lang === 'ar' ? 'مصروف — اعتمد من صفحة المصاريف' : 'expense(s) — approve in Expenses page'}
+                  </span>
+                </div>
+              </div>
             )}
           </Card>
         )}

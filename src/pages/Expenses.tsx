@@ -2,7 +2,7 @@ import { useState, useRef } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   Plus, Search, Receipt, ScanLine, ChevronLeft, ChevronRight,
-  Sparkles, AlertCircle, CheckCircle, Upload, Tag
+  Sparkles, AlertCircle, CheckCircle, Upload, Tag, Check
 } from 'lucide-react'
 import {
   getExpenses, getAiStatus, createExpense, analyzeReceipt,
@@ -126,6 +126,13 @@ export default function Expenses() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['expenses', slug, branchId ?? 'login-branch'] })
       setStatusModalItem(null)
+    },
+  })
+
+  const approveMut = useMutation({
+    mutationFn: (expenseId: string) => updateExpenseStatus(slug, expenseId, 'approved'),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['expenses', slug, branchId ?? 'login-branch'] })
     },
   })
 
@@ -256,6 +263,7 @@ export default function Expenses() {
                   <th className="px-4 py-3 text-xs font-semibold text-gray-500">التاريخ</th>
                   <th className="px-4 py-3 text-xs font-semibold text-gray-500">الحالة</th>
                   <th className="px-4 py-3 text-xs font-semibold text-gray-500">ملاحظات</th>
+                  <th className="px-4 py-3 text-xs font-semibold text-gray-500"></th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-50">
@@ -295,11 +303,23 @@ export default function Expenses() {
                     <td className="px-4 py-3 text-gray-400 text-xs max-w-[160px] truncate">
                       {exp.notes || '—'}
                     </td>
+                    <td className="px-4 py-3">
+                      {exp.status === 'submitted' && (
+                        <button
+                          onClick={() => approveMut.mutate(exp.id)}
+                          disabled={approveMut.isPending}
+                          className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-medium bg-green-50 text-green-700 border border-green-200 hover:bg-green-100 disabled:opacity-50 transition-colors"
+                        >
+                          <Check size={12} />
+                          اعتماد
+                        </button>
+                      )}
+                    </td>
                   </tr>
                 ))}
                 {items.length === 0 && (
                   <tr>
-                    <td colSpan={6} className="text-center py-14 text-gray-400">
+                    <td colSpan={7} className="text-center py-14 text-gray-400">
                       <Receipt size={36} className="mx-auto mb-2 text-gray-200" />
                       لا توجد مصاريف
                     </td>

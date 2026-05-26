@@ -156,7 +156,7 @@ export default function App() {
           <Route
             path="users"
             element={
-              <PermissionGuard adminOnly>
+              <PermissionGuard permissionKey="users">
                 <Users />
               </PermissionGuard>
             }
@@ -164,7 +164,7 @@ export default function App() {
           <Route
             path="branches"
             element={
-              <PermissionGuard adminOnly>
+              <PermissionGuard permissionKey="branches">
                 <Branches />
               </PermissionGuard>
             }

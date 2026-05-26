@@ -22,8 +22,8 @@ const navItems = [
   { to: '/expenses', icon: Receipt, key: 'expenses', tenantOnly: true, permissionKey: 'expenses' },
   { to: '/categories', icon: Tag, key: 'categories', tenantOnly: true },
   { to: '/customers', icon: Users, key: 'customers', tenantOnly: true, permissionKey: 'customers' },
-  { to: '/users', icon: UserCog, key: 'users' },
-  { to: '/branches', icon: Building2, key: 'branches' },
+  { to: '/users', icon: UserCog, key: 'users', permissionKey: 'users' },
+  { to: '/branches', icon: Building2, key: 'branches', permissionKey: 'branches' },
   { to: '/reports', icon: BarChart3, key: 'reports', tenantOnly: true, permissionKey: 'reports' },
   { to: '/settings', icon: Settings, key: 'settings' },
 ]

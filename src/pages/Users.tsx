@@ -21,7 +21,7 @@ import Input from '../components/ui/Input'
 import Spinner from '../components/ui/Spinner'
 import { ROLE_LABELS } from '../types'
 
-const ALL_PERMISSIONS = ['pos', 'products', 'services', 'customers', 'appointments', 'employees', 'expenses', 'cashier', 'invoices', 'reports']
+const ALL_PERMISSIONS = ['pos', 'products', 'services', 'customers', 'appointments', 'employees', 'expenses', 'cashier', 'invoices', 'reports', 'users', 'branches']
 const PLATFORM_ROLES = ['TENANT', 'CASHIER', 'HR', 'BRANCH_MANAGER']
 const BRANCH_ROLES = ['BRANCH_MANAGER', 'HR', 'CASHIER']
 
