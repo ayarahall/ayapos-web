@@ -3,7 +3,7 @@ import type { PagedResult, InvoiceListItem, InvoiceDetail } from '../types'
 
 export async function getInvoices(
   tenantSlug: string,
-  params: { page?: number; pageSize?: number; status?: string; search?: string } = {}
+  params: { page?: number; pageSize?: number; status?: string; search?: string; dateFrom?: string; dateTo?: string } = {}
 ): Promise<PagedResult<InvoiceListItem>> {
   const res = await client.get<PagedResult<InvoiceListItem>>(
     `/t/${tenantSlug}/invoices`,
@@ -58,7 +58,7 @@ export async function finalizeInvoice(tenantSlug: string, invoiceId: string): Pr
 export async function addPayment(
   tenantSlug: string,
   invoiceId: string,
-  payload: { method: number; amountCents: number; reference?: string }
+  payload: { method: number; amountCents: number; reference?: string; appointmentId?: string }
 ): Promise<void> {
   const methodMap: Record<number, number> = {
     0: 1,
