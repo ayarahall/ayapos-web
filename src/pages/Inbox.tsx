@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Bell, CalendarDays, Receipt, Check, X, Clock, CheckCircle2 } from 'lucide-react'
-import { getAppointments, updateAppointmentStatus } from '../api/appointments'
+import { Bell, CalendarDays, Receipt, Check, Clock, CheckCircle2 } from 'lucide-react'
+import { getAppointments } from '../api/appointments'
 import { getExpenses, updateExpenseStatus } from '../api/expenses'
 import { useAuthStore } from '../store/authStore'
 import { useLangStore } from '../store/langStore'
@@ -38,10 +38,9 @@ export default function Inbox() {
   const lang = useLangStore((s) => s.lang)
   const slug = user?.tenantSlug ?? ''
   const canApproveExpenses = CAN_APPROVE_EXPENSES.has(user?.role ?? '')
-  const isAdminRole = user?.role === 'OWNER' || user?.role === 'ADMIN' || user?.role === 'TENANT'
 
   const [activeTab, setActiveTab] = useState<Tab>('appointments')
-  const [actingId, setActingId] = useState<string | null>(null)
+  const [approvingId, setApprovingId] = useState<string | null>(null)
 
   const today = todayInDubaiISO()
   const { dateFrom, dateTo } = dateRangeForDubaiDay(today)
@@ -61,28 +60,18 @@ export default function Inbox() {
     select: (d) => d.items.filter((e) => e.status === 'submitted'),
   })
 
-  /* Filter appointments: non-admin sees only their own */
-  const myAppointments = (apptPage?.items ?? [])
-    .filter((a) => isAdminRole || !a.resourceName || a.resourceName === user?.username)
-    .sort((a, b) => new Date(a.startAt).getTime() - new Date(b.startAt).getTime())
+  /* All today's appointments, sorted by time */
+  const todayAppointments = (apptPage?.items ?? []).sort(
+    (a, b) => new Date(a.startAt).getTime() - new Date(b.startAt).getTime()
+  )
 
-  const pendingApptCount = myAppointments.filter((a) => a.status === 'scheduled').length
   const pendingExpCount = submittedExpenses?.length ?? 0
-  const totalPending = pendingApptCount + pendingExpCount
 
-  /* ── Mutations ── */
-  const apptMut = useMutation({
-    mutationFn: ({ id, status }: { id: string; status: string }) =>
-      updateAppointmentStatus(slug, id, status),
-    onMutate: ({ id }) => setActingId(id),
-    onSettled: () => setActingId(null),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['appointments', slug] }),
-  })
-
+  /* ── Expense approve mutation ── */
   const approveMut = useMutation({
     mutationFn: (expenseId: string) => updateExpenseStatus(slug, expenseId, 'approved'),
-    onMutate: (id) => setActingId(id),
-    onSettled: () => setActingId(null),
+    onMutate: (id) => setApprovingId(id),
+    onSettled: () => setApprovingId(null),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['expenses', slug] }),
   })
 
@@ -94,18 +83,18 @@ export default function Inbox() {
       <div className="flex items-center gap-3">
         <div className="relative w-11 h-11 bg-blue-50 rounded-xl flex items-center justify-center flex-shrink-0">
           <Bell size={20} className="text-blue-600" />
-          {totalPending > 0 && (
+          {pendingExpCount > 0 && (
             <span className="absolute -top-1 -end-1 w-5 h-5 bg-red-500 text-white text-xs rounded-full flex items-center justify-center font-bold">
-              {totalPending > 9 ? '9+' : totalPending}
+              {pendingExpCount > 9 ? '9+' : pendingExpCount}
             </span>
           )}
         </div>
         <div>
           <h1 className="text-xl font-bold text-gray-900">الصندوق الوارد</h1>
           <p className="text-sm text-gray-500">
-            {totalPending > 0
-              ? `${totalPending} ${totalPending === 1 ? 'بند يحتاج إلى إجراء' : 'بنود تحتاج إلى إجراء'}`
-              : 'لا يوجد إجراءات معلقة — كل شيء على ما يرام'}
+            {pendingExpCount > 0
+              ? `${pendingExpCount} مصروف ${pendingExpCount === 1 ? 'يحتاج' : 'يحتاجون'} إلى اعتماد`
+              : 'لا توجد إجراءات معلقة'}
           </p>
         </div>
       </div>
@@ -118,10 +107,10 @@ export default function Inbox() {
             ${activeTab === 'appointments' ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-600 hover:text-gray-900'}`}
         >
           <CalendarDays size={15} />
-          مواعيدي اليوم
-          {pendingApptCount > 0 && (
-            <span className="bg-blue-600 text-white text-xs rounded-full min-w-[20px] h-5 px-1 flex items-center justify-center font-bold">
-              {pendingApptCount}
+          مواعيد اليوم
+          {todayAppointments.length > 0 && (
+            <span className="bg-gray-400 text-white text-xs rounded-full min-w-[20px] h-5 px-1 flex items-center justify-center font-bold">
+              {todayAppointments.length}
             </span>
           )}
         </button>
@@ -143,118 +132,91 @@ export default function Inbox() {
         )}
       </div>
 
-      {/* ── My Appointments tab ── */}
+      {/* ── Appointments tab (notifications only) ── */}
       {activeTab === 'appointments' && (
         <Card>
           {apptLoading ? (
             <div className="flex justify-center py-14"><Spinner size="lg" className="text-blue-600" /></div>
-          ) : myAppointments.length === 0 ? (
+          ) : todayAppointments.length === 0 ? (
             <div className="text-center py-16">
               <CalendarDays size={40} className="mx-auto mb-3 text-gray-200" />
-              <p className="text-gray-500 font-medium">لا توجد مواعيد مسجلة لك اليوم</p>
-              <p className="text-gray-400 text-sm mt-1">ستظهر هنا المواعيد المحجوزة باسمك</p>
+              <p className="text-gray-500 font-medium">لا توجد مواعيد اليوم</p>
+              <p className="text-gray-400 text-sm mt-1">ستظهر هنا مواعيد اليوم بمجرد حجزها</p>
             </div>
           ) : (
             <div className="divide-y divide-gray-50">
-              {myAppointments.map((appt) => {
-                const isPending = appt.status === 'scheduled'
-                const isActing = actingId === appt.id
-
-                return (
-                  <div
-                    key={appt.id}
-                    className={`flex items-center gap-4 px-5 py-4 transition-colors ${isPending ? 'hover:bg-blue-50/40' : ''}`}
+              {todayAppointments.map((appt) => (
+                <div key={appt.id} className="flex items-center gap-4 px-5 py-4">
+                  {/* Icon */}
+                  <div className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0
+                    ${appt.status === 'completed' ? 'bg-gray-100'
+                      : appt.status === 'cancelled' || appt.status === 'no_show' ? 'bg-red-50'
+                      : appt.status === 'checked_in' ? 'bg-yellow-50'
+                      : 'bg-blue-50'}`}
                   >
-                    {/* Time + icon */}
-                    <div className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0
-                      ${appt.status === 'completed' ? 'bg-gray-100' : appt.status === 'cancelled' || appt.status === 'no_show' ? 'bg-red-50' : 'bg-blue-50'}`}
-                    >
-                      {appt.status === 'completed'
-                        ? <CheckCircle2 size={16} className="text-gray-400" />
-                        : <Clock size={16} className={appt.status === 'cancelled' || appt.status === 'no_show' ? 'text-red-400' : 'text-blue-500'} />
-                      }
-                    </div>
+                    {appt.status === 'completed'
+                      ? <CheckCircle2 size={16} className="text-gray-400" />
+                      : <Clock size={16} className={
+                          appt.status === 'cancelled' || appt.status === 'no_show' ? 'text-red-400'
+                          : appt.status === 'checked_in' ? 'text-yellow-500'
+                          : 'text-blue-500'
+                        } />
+                    }
+                  </div>
 
-                    {/* Info */}
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <p className={`font-semibold truncate ${appt.status === 'completed' || appt.status === 'cancelled' ? 'text-gray-400' : 'text-gray-900'}`}>
-                          {appt.customerName || '—'}
-                        </p>
-                        {appt.customerPhone && (
-                          <span className="text-xs text-gray-400 font-mono">{appt.customerPhone}</span>
-                        )}
-                      </div>
-                      <p className="text-xs text-gray-500 mt-0.5 truncate">
-                        {appt.serviceName}
-                        <span className="mx-1.5 text-gray-300">·</span>
-                        {formatTime(appt.startAt, lang)} — {formatTime(appt.endAt, lang)}
-                        {isAdminRole && appt.resourceName && (
-                          <span className="ms-2 text-blue-500 font-medium">({appt.resourceName})</span>
-                        )}
+                  {/* Info */}
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <p className={`font-semibold truncate
+                        ${appt.status === 'completed' || appt.status === 'cancelled' ? 'text-gray-400' : 'text-gray-900'}`}>
+                        {appt.customerName || '—'}
                       </p>
-                    </div>
-
-                    {/* Status + actions */}
-                    <div className="flex items-center gap-2 flex-shrink-0">
-                      <Badge variant={APPT_STATUS_VARIANT[appt.status] ?? 'gray'}>
-                        {APPT_STATUS_LABEL[appt.status] ?? appt.status}
-                      </Badge>
-
-                      {isPending && (
-                        <>
-                          <button
-                            onClick={() => apptMut.mutate({ id: appt.id, status: 'confirmed' })}
-                            disabled={isActing}
-                            className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold
-                              bg-green-50 text-green-700 border border-green-200 hover:bg-green-100
-                              disabled:opacity-50 transition-colors"
-                          >
-                            <Check size={12} />
-                            قبول
-                          </button>
-                          <button
-                            onClick={() => apptMut.mutate({ id: appt.id, status: 'cancelled' })}
-                            disabled={isActing}
-                            className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold
-                              bg-red-50 text-red-700 border border-red-200 hover:bg-red-100
-                              disabled:opacity-50 transition-colors"
-                          >
-                            <X size={12} />
-                            رفض
-                          </button>
-                        </>
+                      {appt.customerPhone && (
+                        <span className="text-xs text-gray-400 font-mono">{appt.customerPhone}</span>
                       )}
                     </div>
+                    <p className="text-xs text-gray-500 mt-0.5 truncate">
+                      {appt.serviceName}
+                      {appt.resourceName && (
+                        <>
+                          <span className="mx-1.5 text-gray-300">·</span>
+                          <span className="text-blue-500">{appt.resourceName}</span>
+                        </>
+                      )}
+                      <span className="mx-1.5 text-gray-300">·</span>
+                      {formatTime(appt.startAt, lang)} — {formatTime(appt.endAt, lang)}
+                    </p>
                   </div>
-                )
-              })}
+
+                  {/* Status badge only — no actions */}
+                  <Badge variant={APPT_STATUS_VARIANT[appt.status] ?? 'gray'}>
+                    {APPT_STATUS_LABEL[appt.status] ?? appt.status}
+                  </Badge>
+                </div>
+              ))}
             </div>
           )}
 
-          {/* Today summary footer */}
-          {myAppointments.length > 0 && (
+          {/* Summary footer */}
+          {todayAppointments.length > 0 && (
             <div className="px-5 py-3 bg-gray-50 border-t border-gray-100 flex flex-wrap gap-4 text-xs text-gray-500">
-              <span className="flex items-center gap-1.5">
-                <span className="w-2 h-2 rounded-full bg-blue-400 inline-block" />
-                {myAppointments.filter((a) => a.status === 'scheduled').length} محجوز
-              </span>
-              <span className="flex items-center gap-1.5">
-                <span className="w-2 h-2 rounded-full bg-green-400 inline-block" />
-                {myAppointments.filter((a) => a.status === 'confirmed').length} مؤكد
-              </span>
-              <span className="flex items-center gap-1.5">
-                <span className="w-2 h-2 rounded-full bg-yellow-400 inline-block" />
-                {myAppointments.filter((a) => a.status === 'checked_in').length} تسجيل حضور
-              </span>
-              <span className="flex items-center gap-1.5">
-                <span className="w-2 h-2 rounded-full bg-gray-400 inline-block" />
-                {myAppointments.filter((a) => a.status === 'completed').length} مكتمل
-              </span>
-              <span className="flex items-center gap-1.5">
-                <span className="w-2 h-2 rounded-full bg-red-400 inline-block" />
-                {myAppointments.filter((a) => a.status === 'no_show' || a.status === 'cancelled').length} غياب/إلغاء
-              </span>
+              {[
+                { key: 'scheduled', label: 'محجوز', color: 'bg-blue-400' },
+                { key: 'confirmed', label: 'مؤكد', color: 'bg-green-400' },
+                { key: 'checked_in', label: 'حضر', color: 'bg-yellow-400' },
+                { key: 'completed', label: 'مكتمل', color: 'bg-gray-400' },
+                { key: 'no_show', label: 'غياب', color: 'bg-red-400' },
+                { key: 'cancelled', label: 'ملغى', color: 'bg-red-300' },
+              ].map(({ key, label, color }) => {
+                const count = todayAppointments.filter((a) => a.status === key).length
+                if (count === 0) return null
+                return (
+                  <span key={key} className="flex items-center gap-1.5">
+                    <span className={`w-2 h-2 rounded-full ${color} inline-block`} />
+                    {count} {label}
+                  </span>
+                )
+              })}
             </div>
           )}
         </Card>
@@ -265,7 +227,7 @@ export default function Inbox() {
         <Card>
           {expLoading ? (
             <div className="flex justify-center py-14"><Spinner size="lg" className="text-blue-600" /></div>
-          ) : (submittedExpenses?.length ?? 0) === 0 ? (
+          ) : pendingExpCount === 0 ? (
             <div className="text-center py-16">
               <Receipt size={40} className="mx-auto mb-3 text-gray-200" />
               <p className="text-gray-500 font-medium">لا توجد مصاريف بانتظار الاعتماد</p>
@@ -273,54 +235,45 @@ export default function Inbox() {
             </div>
           ) : (
             <div className="divide-y divide-gray-50">
-              {submittedExpenses!.map((exp) => {
-                const isActing = actingId === exp.id
-                return (
-                  <div key={exp.id} className="flex items-center gap-4 px-5 py-4 hover:bg-orange-50/30 transition-colors">
-                    {/* Icon */}
-                    <div className="w-10 h-10 bg-orange-50 rounded-xl flex items-center justify-center flex-shrink-0">
-                      <Receipt size={16} className="text-orange-500" />
-                    </div>
-
-                    {/* Info */}
-                    <div className="min-w-0 flex-1">
-                      <p className="font-semibold text-gray-900 truncate">{exp.title}</p>
-                      <p className="text-xs text-gray-500 mt-0.5">{exp.category}</p>
-                    </div>
-
-                    {/* Amount + action */}
-                    <div className="flex items-center gap-3 flex-shrink-0">
-                      <div className="text-end">
-                        <p className="text-sm font-bold text-gray-900">
-                          {exp.amount.toFixed(2)} {exp.currencyCode}
-                        </p>
-                        <p className="text-xs text-blue-600 font-medium">مقدمة للاعتماد</p>
-                      </div>
-                      <button
-                        onClick={() => approveMut.mutate(exp.id)}
-                        disabled={isActing}
-                        className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold
-                          bg-green-50 text-green-700 border border-green-200 hover:bg-green-100
-                          disabled:opacity-50 transition-colors"
-                      >
-                        <Check size={12} />
-                        اعتماد
-                      </button>
-                    </div>
+              {submittedExpenses!.map((exp) => (
+                <div key={exp.id} className="flex items-center gap-4 px-5 py-4 hover:bg-orange-50/30 transition-colors">
+                  <div className="w-10 h-10 bg-orange-50 rounded-xl flex items-center justify-center flex-shrink-0">
+                    <Receipt size={16} className="text-orange-500" />
                   </div>
-                )
-              })}
 
-              {/* Total footer */}
+                  <div className="min-w-0 flex-1">
+                    <p className="font-semibold text-gray-900 truncate">{exp.title}</p>
+                    <p className="text-xs text-gray-500 mt-0.5">{exp.category}</p>
+                  </div>
+
+                  <div className="flex items-center gap-3 flex-shrink-0">
+                    <div className="text-end">
+                      <p className="text-sm font-bold text-gray-900">
+                        {exp.amount.toFixed(2)} {exp.currencyCode}
+                      </p>
+                      <p className="text-xs text-blue-600 font-medium">بانتظار الاعتماد</p>
+                    </div>
+                    <button
+                      onClick={() => approveMut.mutate(exp.id)}
+                      disabled={approvingId === exp.id}
+                      className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold
+                        bg-green-50 text-green-700 border border-green-200 hover:bg-green-100
+                        disabled:opacity-50 transition-colors"
+                    >
+                      <Check size={12} />
+                      اعتماد
+                    </button>
+                  </div>
+                </div>
+              ))}
+
               <div className="px-5 py-3 bg-gray-50 border-t border-gray-100 flex items-center justify-between">
                 <span className="text-xs text-gray-500">
-                  {submittedExpenses!.length} مصروف بانتظار الاعتماد
+                  {pendingExpCount} مصروف بانتظار الاعتماد
                 </span>
                 <span className="text-sm font-bold text-gray-800">
                   {submittedExpenses!.reduce((s, e) => s + e.amount, 0).toFixed(2)}{' '}
-                  <span className="text-xs text-gray-400 font-normal">
-                    {submittedExpenses![0]?.currencyCode}
-                  </span>
+                  <span className="text-xs text-gray-400 font-normal">{submittedExpenses![0]?.currencyCode}</span>
                 </span>
               </div>
             </div>

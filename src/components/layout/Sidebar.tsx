@@ -8,9 +8,7 @@ import { useQuery } from '@tanstack/react-query'
 import { useAuthStore } from '../../store/authStore'
 import { useT } from '../../i18n/useT'
 import { getTenantBranches } from '../../api/tenantAdmin'
-import { getAppointments } from '../../api/appointments'
 import { getExpenses } from '../../api/expenses'
-import { dateRangeForDubaiDay, todayInDubaiISO } from '../../utils/date'
 
 const ADMIN_ROLES = ['OWNER', 'ADMIN', 'TENANT']
 
@@ -45,31 +43,17 @@ export default function Sidebar() {
   })
 
   const slug = user?.tenantSlug ?? ''
-  const today = todayInDubaiISO()
-  const { dateFrom, dateTo } = dateRangeForDubaiDay(today)
-  const isAdminRole = user?.role === 'OWNER' || user?.role === 'ADMIN' || user?.role === 'TENANT'
   const canApproveExpenses = CAN_APPROVE_EXPENSES.has(user?.role ?? '')
-
-  const { data: apptPage } = useQuery({
-    queryKey: ['appointments', slug, branchId ?? 'login-branch', 'inbox-today', dateFrom, dateTo],
-    queryFn: () => getAppointments(slug, { page: 1, pageSize: 100, dateFrom, dateTo }),
-    enabled: !!slug && user?.scope === 'tenant',
-    staleTime: 30_000,
-  })
 
   const { data: submittedExpenses } = useQuery({
     queryKey: ['expenses', slug, branchId ?? 'login-branch', 'inbox-submitted'],
     queryFn: () => getExpenses(slug, { page: 1, pageSize: 50 }),
     enabled: !!slug && canApproveExpenses,
     staleTime: 30_000,
-    select: (d) => d.items.filter((e) => e.status === 'submitted'),
+    select: (d) => d.items.filter((e: { status: string }) => e.status === 'submitted'),
   })
 
-  const myPendingAppts = (apptPage?.items ?? []).filter(
-    (a) => a.status === 'scheduled' && (isAdminRole || !a.resourceName || a.resourceName === user?.username)
-  ).length
-  const pendingExpenses = submittedExpenses?.length ?? 0
-  const inboxBadge = myPendingAppts + pendingExpenses
+  const inboxBadge = submittedExpenses?.length ?? 0
 
   const isAdmin = ADMIN_ROLES.includes(user?.role ?? '')
   const userPermissions = user?.permissions ?? []
