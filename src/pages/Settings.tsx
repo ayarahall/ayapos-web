@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { useQuery, useMutation } from '@tanstack/react-query'
 import { Settings2, User, Key, Shield, CheckCircle, Printer, CreditCard } from 'lucide-react'
 import { changePassword } from '../api/auth'
@@ -12,6 +13,8 @@ import Badge from '../components/ui/Badge'
 import Spinner from '../components/ui/Spinner'
 import { ROLE_LABELS } from '../types'
 import { loadPosSettings, savePosSettings, type PosSettings } from '../utils/posSettings'
+
+const ADMIN_ROLES = new Set(['OWNER', 'ADMIN', 'TENANT'])
 
 const defaultPrintSettings: PrintSettings = {
   companyName: '', companyLogoUrl: '', companyPhone: '',
@@ -232,8 +235,10 @@ function ReceiptSettingsForm({
 
 export default function Settings() {
   const { user, branchId } = useAuthStore()
+  const navigate = useNavigate()
   const t = useT()
   const isTenant = user?.scope === 'tenant'
+  const isAdminRole = ADMIN_ROLES.has(user?.role ?? '')
   const [pwdForm, setPwdForm] = useState({ current: '', next: '', confirm: '' })
   const [pwdSuccess, setPwdSuccess] = useState(false)
   const [pwdError, setPwdError] = useState('')
@@ -256,6 +261,26 @@ export default function Settings() {
 
   return (
     <div className="space-y-6 max-w-2xl">
+      {/* User permissions management — admin/owner only */}
+      {isAdminRole && (
+        <Card>
+          <div className="px-5 py-4 border-b border-gray-100 flex items-center gap-3">
+            <div className="w-8 h-8 bg-purple-100 rounded-lg flex items-center justify-center">
+              <Shield size={16} className="text-purple-600" />
+            </div>
+            <h3 className="font-semibold text-gray-800">إدارة صلاحيات المستخدمين</h3>
+          </div>
+          <div className="px-5 py-5 space-y-4">
+            <p className="text-sm text-gray-500">
+              تحكم في الصفحات والوظائف التي يمكن لكل موظف الوصول إليها
+            </p>
+            <Button onClick={() => navigate('/users')}>
+              فتح إدارة المستخدمين
+            </Button>
+          </div>
+        </Card>
+      )}
+
       {/* Account info */}
       <Card>
         <div className="px-5 py-4 border-b border-gray-100 flex items-center gap-3">

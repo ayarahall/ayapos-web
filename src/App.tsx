@@ -19,10 +19,52 @@ import Reports from './pages/Reports'
 import Settings from './pages/Settings'
 import TenantAdmin from './pages/TenantAdmin'
 
+const ADMIN_ROLES = new Set(['OWNER', 'ADMIN', 'TENANT'])
+
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const token = useAuthStore((s) => s.token)
   if (!token) return <Navigate to="/login" replace />
   return <>{children}</>
+}
+
+/**
+ * PermissionGuard — wraps sensitive routes.
+ *
+ * Rules:
+ * - OWNER / ADMIN / TENANT are always allowed.
+ * - If permissionsConfigured = false, allow everything.
+ * - If adminOnly = true, only OWNER / ADMIN / TENANT are allowed.
+ * - Otherwise checks that permissionKey is present in user.permissions.
+ * - Redirects to /dashboard when denied.
+ */
+function PermissionGuard({
+  children,
+  permissionKey,
+  adminOnly = false,
+}: {
+  children: React.ReactNode
+  permissionKey?: string
+  adminOnly?: boolean
+}) {
+  const user = useAuthStore((s) => s.user)
+
+  if (!user) return <Navigate to="/login" replace />
+
+  // Admin roles are always allowed
+  if (ADMIN_ROLES.has(user.role)) return <>{children}</>
+
+  // Admin-only routes — non-admin roles are blocked
+  if (adminOnly) return <Navigate to="/dashboard" replace />
+
+  // If permissions haven't been configured yet, allow everything
+  if (!user.permissionsConfigured) return <>{children}</>
+
+  // Check the specific permission key
+  if (permissionKey && user.permissions.includes(permissionKey)) {
+    return <>{children}</>
+  }
+
+  return <Navigate to="/dashboard" replace />
 }
 
 export default function App() {
@@ -47,18 +89,95 @@ export default function App() {
         >
           <Route index element={<Navigate to="/dashboard" replace />} />
           <Route path="dashboard" element={<Dashboard />} />
-          <Route path="pos" element={<POS />} />
-          <Route path="invoices" element={<Invoices />} />
-          <Route path="products" element={<Products />} />
-          <Route path="services" element={<Services />} />
-          <Route path="appointments" element={<Appointments />} />
-          <Route path="expenses" element={<Expenses />} />
+          <Route
+            path="pos"
+            element={
+              <PermissionGuard permissionKey="pos">
+                <POS />
+              </PermissionGuard>
+            }
+          />
+          <Route
+            path="invoices"
+            element={
+              <PermissionGuard permissionKey="invoices">
+                <Invoices />
+              </PermissionGuard>
+            }
+          />
+          <Route
+            path="products"
+            element={
+              <PermissionGuard permissionKey="products">
+                <Products />
+              </PermissionGuard>
+            }
+          />
+          <Route
+            path="services"
+            element={
+              <PermissionGuard permissionKey="services">
+                <Services />
+              </PermissionGuard>
+            }
+          />
+          <Route
+            path="appointments"
+            element={
+              <PermissionGuard permissionKey="appointments">
+                <Appointments />
+              </PermissionGuard>
+            }
+          />
+          <Route
+            path="expenses"
+            element={
+              <PermissionGuard permissionKey="expenses">
+                <Expenses />
+              </PermissionGuard>
+            }
+          />
+          <Route
+            path="customers"
+            element={
+              <PermissionGuard permissionKey="customers">
+                <Customers />
+              </PermissionGuard>
+            }
+          />
+          <Route
+            path="reports"
+            element={
+              <PermissionGuard permissionKey="reports">
+                <Reports />
+              </PermissionGuard>
+            }
+          />
+          <Route
+            path="users"
+            element={
+              <PermissionGuard adminOnly>
+                <Users />
+              </PermissionGuard>
+            }
+          />
+          <Route
+            path="branches"
+            element={
+              <PermissionGuard adminOnly>
+                <Branches />
+              </PermissionGuard>
+            }
+          />
+          <Route
+            path="settings"
+            element={
+              <PermissionGuard adminOnly>
+                <Settings />
+              </PermissionGuard>
+            }
+          />
           <Route path="categories" element={<Categories />} />
-          <Route path="customers" element={<Customers />} />
-          <Route path="users" element={<Users />} />
-          <Route path="branches" element={<Branches />} />
-          <Route path="reports" element={<Reports />} />
-          <Route path="settings" element={<Settings />} />
           <Route path="tenant-admin" element={<TenantAdmin />} />
         </Route>
         <Route path="*" element={<Navigate to="/dashboard" replace />} />
