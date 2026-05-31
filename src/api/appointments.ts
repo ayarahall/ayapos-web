@@ -5,6 +5,7 @@ export interface AppointmentResource {
   userId: string
   username: string
   role: string
+  appointmentColor?: string
 }
 
 export interface AppointmentListItem {
@@ -45,6 +46,7 @@ export interface AppointmentScheduleColumn {
   userId?: string
   resourceName: string
   role: string
+  appointmentColor?: string
   isUnassigned: boolean
   items: AppointmentScheduleEntry[]
 }
@@ -135,3 +137,6 @@ export async function updateAppointment(
   )
   return res.data
 }
+
+
+

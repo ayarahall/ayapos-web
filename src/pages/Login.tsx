@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Store, Eye, EyeOff, Loader2 } from 'lucide-react'
+import { Eye, EyeOff, Loader2 } from 'lucide-react'
 import { loginTenant, loginPlatform, getTenantBranches } from '../api/auth'
 import { useAuthStore } from '../store/authStore'
 import { useLangStore } from '../store/langStore'
@@ -84,13 +84,13 @@ export default function Login() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-blue-950 to-slate-900 flex items-center justify-center p-4">
+    <div className="min-h-screen bg-[radial-gradient(circle_at_top,#fff1f4_0%,#fff7f8_38%,#ffffff_100%)] flex items-center justify-center p-4">
       <div className="w-full max-w-md">
         {/* Language toggle */}
         <div className="flex justify-end mb-4">
           <button
             onClick={toggle}
-            className="px-4 py-1.5 rounded-lg bg-white/10 text-white text-sm font-bold hover:bg-white/20 transition-colors"
+            className="px-4 py-1.5 rounded-lg bg-white text-slate-700 border border-rose-100 text-sm font-bold hover:bg-rose-50 transition-colors shadow-sm"
           >
             {lang === 'ar' ? 'English' : 'العربية'}
           </button>
@@ -98,25 +98,25 @@ export default function Login() {
 
         {/* Logo */}
         <div className="text-center mb-8">
-          <div className="inline-flex items-center justify-center w-16 h-16 bg-blue-600 rounded-2xl mb-4 shadow-lg">
-            <Store size={32} className="text-white" />
+          <div className="inline-flex items-center justify-center mb-4">
+            <img src="/ayapos-logo.png?v=5" alt="AyaPOS" className="h-44 w-44 object-contain drop-shadow-xl" />
           </div>
-          <h1 className="text-3xl font-bold text-white">AyaPOS</h1>
-          <p className="text-slate-400 mt-1">{t.login.title}</p>
+          <h1 className="text-3xl font-bold text-slate-950">AyaPOS</h1>
+          <p className="text-slate-500 mt-1">{t.login.title}</p>
         </div>
 
         {/* Card */}
-        <div className="bg-white rounded-2xl shadow-2xl overflow-hidden">
+        <div className="bg-white rounded-2xl shadow-2xl shadow-rose-100/70 overflow-hidden border border-rose-100">
           {/* Tabs */}
           <div className="flex border-b border-gray-100">
             <button onClick={() => { setTab('tenant'); setError('') }}
               className={`flex-1 py-3.5 text-sm font-semibold transition-colors
-                ${tab === 'tenant' ? 'text-blue-600 border-b-2 border-blue-600' : 'text-gray-500 hover:text-gray-700'}`}>
+                ${tab === 'tenant' ? 'text-rose-600 border-b-2 border-rose-600' : 'text-gray-500 hover:text-gray-700'}`}>
               {t.login.tenantTab}
             </button>
             <button onClick={() => { setTab('platform'); setError('') }}
               className={`flex-1 py-3.5 text-sm font-semibold transition-colors
-                ${tab === 'platform' ? 'text-blue-600 border-b-2 border-blue-600' : 'text-gray-500 hover:text-gray-700'}`}>
+                ${tab === 'platform' ? 'text-rose-600 border-b-2 border-rose-600' : 'text-gray-500 hover:text-gray-700'}`}>
               {t.login.platformTab}
             </button>
           </div>
@@ -137,7 +137,7 @@ export default function Login() {
                       onBlur={(e) => fetchBranches(e.target.value)}
                       onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); fetchBranches(form.tenantSlug) } }}
                       className={`w-full border rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 pe-9
-                        ${slugError ? 'border-red-400 focus:ring-red-400' : slugChecked ? 'border-green-400 focus:ring-green-500' : 'border-gray-300 focus:ring-blue-500'}`}
+                        ${slugError ? 'border-red-400 focus:ring-red-400' : slugChecked ? 'border-green-400 focus:ring-green-500' : 'border-gray-300 focus:ring-rose-500 focus:border-rose-400'}`}
                     />
                     <span className="absolute end-3 top-1/2 -translate-y-1/2">
                       {branchesLoading && <Loader2 size={16} className="animate-spin text-gray-400" />}
@@ -154,7 +154,7 @@ export default function Login() {
                     value={form.branchId}
                     onChange={(e) => setForm((f) => ({ ...f, branchId: e.target.value }))}
                     disabled={branches.length === 0}
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white disabled:bg-gray-50 disabled:text-gray-400"
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-rose-500 bg-white disabled:bg-gray-50 disabled:text-gray-400"
                   >
                     <option value="">{t.login.selectBranch}</option>
                     {branches.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
@@ -170,7 +170,7 @@ export default function Login() {
               <label className="block text-sm font-medium text-gray-700 mb-1">{t.login.username}</label>
               <input type="text" required autoComplete="username" value={form.username}
                 onChange={(e) => setForm((f) => ({ ...f, username: e.target.value }))}
-                className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-rose-500" />
             </div>
 
             <div>
@@ -179,7 +179,7 @@ export default function Login() {
                 <input type={showPassword ? 'text' : 'password'} required autoComplete="current-password"
                   value={form.password}
                   onChange={(e) => setForm((f) => ({ ...f, password: e.target.value }))}
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 pe-10" />
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-rose-500 pe-10" />
                 <button type="button" onClick={() => setShowPassword((v) => !v)}
                   className="absolute end-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
                   {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
@@ -192,7 +192,7 @@ export default function Login() {
             )}
 
             <button type="submit" disabled={loading}
-              className="w-full bg-blue-600 text-white font-semibold py-2.5 rounded-lg hover:bg-blue-700
+              className="w-full bg-rose-600 text-white font-semibold py-2.5 rounded-lg hover:bg-rose-700
                 disabled:opacity-60 flex items-center justify-center gap-2 transition-colors">
               {loading && <Loader2 size={18} className="animate-spin" />}
               {loading ? t.login.loggingIn : t.login.login}

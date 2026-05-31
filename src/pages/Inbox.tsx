@@ -37,7 +37,9 @@ export default function Inbox() {
   const { user, branchId } = useAuthStore()
   const lang = useLangStore((s) => s.lang)
   const slug = user?.tenantSlug ?? ''
-  const canApproveExpenses = CAN_APPROVE_EXPENSES.has(user?.role ?? '')
+  const canApproveExpenses = user?.permissionsConfigured
+    ? (user.permissions ?? []).includes('expenses.approve')
+    : CAN_APPROVE_EXPENSES.has(user?.role ?? '')
 
   const [activeTab, setActiveTab] = useState<Tab>('appointments')
   const [approvingId, setApprovingId] = useState<string | null>(null)
@@ -55,9 +57,9 @@ export default function Inbox() {
 
   const { data: submittedExpenses, isLoading: expLoading } = useQuery({
     queryKey: ['expenses', slug, branchId ?? 'login-branch', 'inbox-submitted'],
-    queryFn: () => getExpenses(slug, { page: 1, pageSize: 50 }),
+    queryFn: () => getExpenses(slug, { page: 1, pageSize: 50, status: 'submitted' }),
     enabled: !!slug && canApproveExpenses,
-    select: (d) => d.items.filter((e) => e.status === 'submitted'),
+    select: (d) => d.items,
   })
 
   const isManager = CAN_APPROVE_EXPENSES.has(user?.role ?? '')

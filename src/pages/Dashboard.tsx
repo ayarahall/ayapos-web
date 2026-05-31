@@ -9,7 +9,7 @@ import {
 import { getDailySummary, getCurrentSession } from '../api/cashier'
 import { getInvoices } from '../api/invoices'
 import { getAppointments, type AppointmentListItem } from '../api/appointments'
-import { getExpenses, type Expense } from '../api/expenses'
+import { getExpenses } from '../api/expenses'
 import { useAuthStore } from '../store/authStore'
 import { useLangStore } from '../store/langStore'
 import { useT } from '../i18n/useT'
@@ -38,7 +38,7 @@ const isPastAppointment = (endAt: string) => new Date(endAt).getTime() < Date.no
 
 // ─── Widget config (localStorage) ────────────────────────────────────────────
 
-type WidgetId = 'stats' | 'appt-chart' | 'appt-live' | 'invoices-recent' | 'open-pos' | 'top-items' | 'daily-tasks' | 'expenses-pending'
+type WidgetId = 'stats' | 'appt-chart' | 'staff-productivity' | 'appt-live' | 'invoices-recent' | 'open-pos' | 'top-items' | 'daily-tasks' | 'expenses-pending'
 
 interface WidgetConfig {
   id: WidgetId
@@ -48,6 +48,7 @@ interface WidgetConfig {
 const DEFAULT_WIDGETS: WidgetConfig[] = [
   { id: 'stats', visible: true },
   { id: 'appt-chart', visible: true },
+  { id: 'staff-productivity', visible: true },
   { id: 'invoices-recent', visible: true },
   { id: 'appt-live', visible: true },
   { id: 'expenses-pending', visible: true },
@@ -59,6 +60,7 @@ const DEFAULT_WIDGETS: WidgetConfig[] = [
 const WIDGET_LABELS: Record<WidgetId, string> = {
   stats: 'الإحصائيات',
   'appt-chart': 'مواعيد اليوم — رسم بياني',
+  'staff-productivity': 'إنتاجية الموظفين',
   'appt-live': 'مواعيد اليوم — الحالة الحية',
   'invoices-recent': 'الفواتير الأخيرة',
   'expenses-pending': 'المصاريف — بانتظار الاعتماد',
@@ -131,7 +133,7 @@ function CustomizePanel({
   return (
     <div
       ref={panelRef}
-      className="absolute top-12 end-0 z-50 w-72 bg-white border border-gray-200 rounded-xl shadow-xl overflow-hidden"
+      className="absolute top-12 end-0 z-50 w-72 bg-white border border-gray-200 rounded-xl shadow-xl shadow-rose-100/60 overflow-hidden"
     >
       <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
         <span className="font-semibold text-gray-800 text-sm">تخصيص لوحة التحكم</span>
@@ -162,7 +164,7 @@ function CustomizePanel({
             {/* Toggle */}
             <button
               onClick={() => toggle(w.id)}
-              className={`relative w-9 h-5 rounded-full transition-colors ${w.visible ? 'bg-blue-600' : 'bg-gray-300'}`}
+              className={`relative w-9 h-5 rounded-full transition-colors ${w.visible ? 'bg-rose-600' : 'bg-gray-300'}`}
             >
               <div
                 className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${w.visible ? 'translate-x-4' : 'translate-x-0.5'}`}
@@ -278,6 +280,74 @@ function ApptBarChart({ bars }: { bars: ChartBar[] }) {
   )
 }
 
+
+interface StaffProductivitySlice {
+  name: string
+  count: number
+  color: string
+}
+
+function StaffProductivityPie({ slices, lang }: { slices: StaffProductivitySlice[]; lang: string }) {
+  const total = slices.reduce((sum, slice) => sum + slice.count, 0)
+  const radius = 54
+  const circumference = 2 * Math.PI * radius
+  let offset = 0
+
+  if (total === 0) {
+    return (
+      <div className="flex h-48 items-center justify-center text-sm text-gray-400">
+        {lang === 'ar' ? 'لا توجد مواعيد مكتملة اليوم' : 'No completed appointments today'}
+      </div>
+    )
+  }
+
+  return (
+    <div className="flex flex-col gap-4 px-4 py-3 md:flex-row md:items-center">
+      <div className="relative mx-auto h-40 w-40 flex-shrink-0">
+        <svg viewBox="0 0 140 140" className="h-40 w-40 -rotate-90">
+          <circle cx="70" cy="70" r={radius} fill="none" stroke="#f3f4f6" strokeWidth="22" />
+          {slices.map((slice) => {
+            const dash = (slice.count / total) * circumference
+            const strokeDasharray = `${dash} ${circumference - dash}`
+            const strokeDashoffset = -offset
+            offset += dash
+            return (
+              <circle
+                key={slice.name}
+                cx="70"
+                cy="70"
+                r={radius}
+                fill="none"
+                stroke={slice.color}
+                strokeWidth="22"
+                strokeDasharray={strokeDasharray}
+                strokeDashoffset={strokeDashoffset}
+                strokeLinecap="butt"
+              />
+            )
+          })}
+        </svg>
+        <div className="absolute inset-0 flex flex-col items-center justify-center">
+          <span className="text-2xl font-bold text-gray-900">{total}</span>
+          <span className="text-xs text-gray-500">{lang === 'ar' ? 'مكتملة' : 'completed'}</span>
+        </div>
+      </div>
+      <div className="min-w-0 flex-1 space-y-2">
+        {slices.map((slice) => {
+          const percent = Math.round((slice.count / total) * 100)
+          return (
+            <div key={slice.name} className="flex items-center gap-2 rounded-lg border border-gray-100 px-3 py-2">
+              <span className="h-3 w-3 rounded-full" style={{ backgroundColor: slice.color }} />
+              <span className="min-w-0 flex-1 truncate text-sm font-medium text-gray-800">{slice.name}</span>
+              <span className="text-xs font-semibold text-gray-500">{slice.count}</span>
+              <span className="text-xs text-gray-400">{percent}%</span>
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
 // ─── Appointment column (live widget) ────────────────────────────────────────
 
 function AppointmentColumn({
@@ -316,7 +386,7 @@ function AppointmentColumn({
               type="button"
               onClick={() => navigate('/appointments')}
               className={`w-full text-start flex items-start justify-between gap-2 px-4 py-3 group transition-colors
-                ${isCompleted ? 'opacity-60' : 'hover:bg-blue-50 cursor-pointer'}`}
+                ${isCompleted ? 'opacity-60' : 'hover:bg-rose-50 cursor-pointer'}`}
             >
               <div className="min-w-0 flex-1">
                 <p className={`text-sm font-semibold truncate ${isCompleted ? 'text-gray-500' : 'text-gray-900'}`}>
@@ -328,12 +398,12 @@ function AppointmentColumn({
                 {badge ? (
                   <Badge variant={badge.variant}>{badge.label}</Badge>
                 ) : (
-                  <p className="text-xs font-bold text-blue-600">{formatTime(a.startAt, lang)}</p>
+                  <p className="text-xs font-bold text-rose-600">{formatTime(a.startAt, lang)}</p>
                 )}
                 {!isCompleted && (
                   <ArrowRight
                     size={13}
-                    className="text-blue-400 opacity-0 group-hover:opacity-100 transition-opacity"
+                    className="text-rose-400 opacity-0 group-hover:opacity-100 transition-opacity"
                   />
                 )}
               </div>
@@ -402,9 +472,16 @@ export default function Dashboard() {
 
   const { data: submittedExpenses } = useQuery({
     queryKey: ['expenses', slug, branchId ?? 'login-branch', 'submitted-dashboard'],
-    queryFn: () => getExpenses(slug, { page: 1, pageSize: 10 }),
+    queryFn: () => getExpenses(slug, { page: 1, pageSize: 10, status: 'submitted' }),
     enabled: !!slug,
-    select: (d) => d.items.filter((e: Expense) => e.status === 'submitted' || e.status === 'draft'),
+    select: (d) => d.items,
+  })
+
+  const { data: todayExpenses } = useQuery({
+    queryKey: ['expenses', slug, branchId ?? 'login-branch', 'dashboard-today', today],
+    queryFn: () => getExpenses(slug, { page: 1, pageSize: 100 }),
+    enabled: !!slug,
+    select: (d) => d.items.filter((exp) => exp.expenseDate?.slice(0, 10) === today),
   })
 
   const hour = new Date().getHours()
@@ -413,9 +490,9 @@ export default function Dashboard() {
   if (isPlatform) {
     return (
       <div className="space-y-6">
-        <div className="bg-gradient-to-l from-blue-600 to-blue-700 rounded-2xl p-6 text-white">
+        <div className="bg-gradient-to-l from-rose-900 to-rose-600 rounded-2xl p-6 text-white">
           <h2 className="text-2xl font-bold">{greeting}, {user?.username}</h2>
-          <p className="text-blue-200 mt-1">AyaPOS Platform</p>
+          <p className="text-rose-100 mt-1">AyaPOS Platform</p>
         </div>
       </div>
     )
@@ -434,19 +511,40 @@ export default function Dashboard() {
   const pendingAppointments = scheduledAppointments.length
   const invoiceCount = summary?.invoiceCount ?? summary?.totalInvoices ?? 0
   const grossSalesCents = summary?.grossSalesCents ?? summary?.totalSalesCents ?? 0
-  const cashCents = session?.totalCashCents || summary?.totalCashCents || summary?.collectedCents || 0
+  const cashCents = session?.expectedCashCents ?? summary?.totalCashCents ?? summary?.collectedCents ?? 0
   const paidInvoices = summary?.paidInvoiceCount ?? (invoicesPage?.items ?? []).filter((invoice) => invoice.status === 'Paid').length
+  const expenseItems = todayExpenses ?? []
+  const activeExpenses = expenseItems.filter((exp) => exp.status !== 'cancelled')
+  const paidOrApprovedExpenses = expenseItems.filter((exp) => exp.status === 'approved' || exp.status === 'paid')
+  const totalExpenseAmount = activeExpenses.reduce((sum, exp) => sum + exp.amount, 0)
+  const approvedExpenseAmount = paidOrApprovedExpenses.reduce((sum, exp) => sum + exp.amount, 0)
+  const cashExpenseAmount = paidOrApprovedExpenses
+    .filter((exp) => exp.paymentMethod === 'cash')
+    .reduce((sum, exp) => sum + exp.amount, 0)
+  const pendingExpenseAmount = (submittedExpenses ?? []).reduce((sum, exp) => sum + exp.amount, 0)
   const topItems = [
     ...(summary?.topProducts ?? []).map((item) => ({ name: item.name, qty: item.quantity, totalCents: item.totalCents })),
     ...(summary?.topServices ?? []).map((item) => ({ name: item.name, qty: item.quantity, totalCents: item.totalCents })),
     ...(summary?.topItems ?? []),
   ].sort((a, b) => b.totalCents - a.totalCents)
 
+  const productivityColors = ['#e5093f', '#be123c', '#f43f5e', '#fb7185', '#111827', '#6b7280', '#fda4af']
+  const staffProductivity = Object.values(
+    completedAppointments.reduce<Record<string, StaffProductivitySlice>>((acc, appointment) => {
+      const name = appointment.resourceName?.trim() || (lang === 'ar' ? 'غير محدد' : 'Unassigned')
+      if (!acc[name]) {
+        acc[name] = { name, count: 0, color: productivityColors[Object.keys(acc).length % productivityColors.length] }
+      }
+      acc[name].count += 1
+      return acc
+    }, {})
+  ).sort((a, b) => b.count - a.count)
   const stats = [
-    { label: t.dashboard.invoicesCount, value: invoiceCount, icon: ShoppingCart, color: 'text-blue-600', bg: 'bg-blue-50' },
-    { label: t.dashboard.dailySales, value: `${fmt(grossSalesCents)} AED`, icon: TrendingUp, color: 'text-green-600', bg: 'bg-green-50' },
-    { label: t.reports.cash, value: `${fmt(cashCents)} AED`, icon: DollarSign, color: 'text-amber-600', bg: 'bg-amber-50' },
-    { label: lang === 'ar' ? 'مواعيد بانتظار الحضور' : 'Waiting Check-In', value: pendingAppointments, icon: CalendarCheck, color: 'text-purple-600', bg: 'bg-purple-50' },
+    { label: t.dashboard.invoicesCount, value: invoiceCount, icon: ShoppingCart, color: 'text-rose-600', bg: 'bg-rose-50' },
+    { label: t.dashboard.dailySales, value: `${fmt(grossSalesCents)} AED`, icon: TrendingUp, color: 'text-rose-600', bg: 'bg-white' },
+    { label: t.reports.cash, value: `${fmt(cashCents)} AED`, icon: DollarSign, color: 'text-slate-700', bg: 'bg-rose-50' },
+    { label: lang === 'ar' ? 'مواعيد بانتظار الحضور' : 'Waiting Check-In', value: pendingAppointments, icon: CalendarCheck, color: 'text-rose-600', bg: 'bg-rose-50' },
+    { label: lang === 'ar' ? 'مصاريف اليوم' : 'Today Expenses', value: `${totalExpenseAmount.toFixed(2)} AED`, icon: Receipt, color: 'text-rose-600', bg: 'bg-rose-50' },
   ]
 
   const dailyTasks = [
@@ -474,9 +572,9 @@ export default function Dashboard() {
 
   // Chart bars data
   const chartBars: ChartBar[] = [
-    { label: 'محجوز', count: scheduledAppointments.length, fill: '#3b82f6', badgeClass: 'bg-blue-100 text-blue-700' },
-    { label: 'حضر', count: checkedInAppointments.length, fill: '#10b981', badgeClass: 'bg-emerald-100 text-emerald-700' },
-    { label: 'لم يحضر', count: noShowAppointments.length, fill: '#ef4444', badgeClass: 'bg-red-100 text-red-700' },
+    { label: 'محجوز', count: scheduledAppointments.length, fill: '#e5093f', badgeClass: 'bg-rose-100 text-rose-700' },
+    { label: 'حضر', count: checkedInAppointments.length, fill: '#be123c', badgeClass: 'bg-rose-100 text-rose-700' },
+    { label: 'لم يحضر', count: noShowAppointments.length, fill: '#111827', badgeClass: 'bg-slate-100 text-slate-700' },
     { label: 'مكتمل', count: completedAppointments.length, fill: '#9ca3af', badgeClass: 'bg-gray-100 text-gray-700' },
   ]
 
@@ -486,15 +584,15 @@ export default function Dashboard() {
   return (
     <div className="space-y-6">
       {/* Header with customize button */}
-      <div className="relative flex items-center justify-between bg-gradient-to-l from-blue-600 to-blue-700 rounded-2xl p-6 text-white">
+      <div className="relative flex items-center justify-between bg-gradient-to-l shadow-lg shadow-rose-100 from-rose-900 to-rose-600 rounded-2xl p-6 text-white">
         <div>
           <h2 className="text-2xl font-bold">{greeting}, {user?.username}</h2>
-          <p className="text-blue-200 mt-1">{formatDate(new Date(), lang)}</p>
+          <p className="text-rose-100 mt-1">{formatDate(new Date(), lang)}</p>
         </div>
         <div className="relative">
           <button
             onClick={() => setCustomizeOpen((v) => !v)}
-            className="flex items-center gap-2 bg-white/20 hover:bg-white/30 transition-colors rounded-xl px-3 py-2 text-sm font-medium"
+            className="flex items-center gap-2 bg-white/20 hover:bg-white/30 border border-white/20 transition-colors rounded-xl px-3 py-2 text-sm font-medium"
           >
             <Settings size={16} />
             تخصيص
@@ -510,14 +608,14 @@ export default function Dashboard() {
       </div>
 
       {!session && (
-        <div className="flex items-center gap-3 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 text-amber-800">
+        <div className="flex items-center gap-3 bg-rose-50 border border-rose-200 rounded-xl px-4 py-3 text-slate-800">
           <AlertCircle size={18} className="flex-shrink-0" />
           <p className="text-sm font-medium">{t.dashboard.sessionAlert}</p>
         </div>
       )}
       {session && (
-        <div className="flex items-center gap-3 bg-green-50 border border-green-200 rounded-xl px-4 py-3 text-green-800">
-          <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
+        <div className="flex items-center gap-3 bg-white border border-rose-100 rounded-xl px-4 py-3 text-slate-800">
+          <div className="w-2 h-2 rounded-full bg-rose-600 animate-pulse" />
           <p className="text-sm font-medium">{formatTime(session.openedAt, lang)}</p>
         </div>
       )}
@@ -525,9 +623,9 @@ export default function Dashboard() {
       {/* Stats widget */}
       {isVisible('stats') && (
         summaryLoading ? (
-          <div className="flex justify-center py-8"><Spinner size="lg" className="text-blue-600" /></div>
+          <div className="flex justify-center py-8"><Spinner size="lg" className="text-rose-600" /></div>
         ) : (
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+          <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
             {stats.map(({ label, value, icon: Icon, color, bg }) => (
               <Card key={label} className="p-5">
                 <div className={`w-10 h-10 ${bg} rounded-xl flex items-center justify-center mb-3`}>
@@ -546,7 +644,7 @@ export default function Dashboard() {
         {isVisible('appt-chart') && (
           <Card title="مواعيد اليوم — رسم بياني">
             {appointmentsLoading ? (
-              <div className="flex justify-center py-8"><Spinner size="md" className="text-blue-600" /></div>
+              <div className="flex justify-center py-8"><Spinner size="md" className="text-rose-600" /></div>
             ) : (
               <div className="px-4 py-3">
                 <ApptBarChart bars={chartBars} />
@@ -555,11 +653,22 @@ export default function Dashboard() {
           </Card>
         )}
 
+
+        {/* Staff productivity pie widget */}
+        {isVisible('staff-productivity') && (
+          <Card title={lang === 'ar' ? 'إنتاجية الموظفين — المواعيد المكتملة' : 'Staff Productivity — Completed Appointments'}>
+            {appointmentsLoading ? (
+              <div className="flex justify-center py-8"><Spinner size="md" className="text-rose-600" /></div>
+            ) : (
+              <StaffProductivityPie slices={staffProductivity} lang={lang} />
+            )}
+          </Card>
+        )}
         {/* Recent invoices widget */}
         {isVisible('invoices-recent') && (
           <Card className="lg:col-span-2" title={t.dashboard.recentInvoices}>
             {invoicesLoading ? (
-              <div className="flex justify-center py-8"><Spinner size="md" className="text-blue-600" /></div>
+              <div className="flex justify-center py-8"><Spinner size="md" className="text-rose-600" /></div>
             ) : (
               <div className="divide-y divide-gray-50">
                 {(invoicesPage?.items ?? []).map((inv) => (
@@ -586,12 +695,12 @@ export default function Dashboard() {
         {isVisible('appt-live') && (
           <Card title={lang === 'ar' ? 'مواعيد اليوم - الحالة الحية' : "Today's Appointments - Live Status"} className="lg:col-span-3">
             {appointmentsLoading ? (
-              <div className="flex justify-center py-8"><Spinner size="md" className="text-blue-600" /></div>
+              <div className="flex justify-center py-8"><Spinner size="md" className="text-rose-600" /></div>
             ) : (
               <div className="grid grid-cols-2 md:grid-cols-4 divide-y-2 md:divide-y-0 md:divide-x md:divide-x-reverse divide-gray-100">
-                <AppointmentColumn title={lang === 'ar' ? 'محجوز' : 'Booked'} count={scheduledAppointments.length} items={scheduledAppointments} colorClass="text-blue-700" dotClass="bg-blue-400" emptyText={lang === 'ar' ? 'لا يوجد' : 'None'} lang={lang} />
-                <AppointmentColumn title={lang === 'ar' ? 'تم تسجيل الحضور' : 'Checked In'} count={checkedInAppointments.length} items={checkedInAppointments} colorClass="text-emerald-700" dotClass="bg-emerald-500" badge={{ label: lang === 'ar' ? 'في الكاشير' : 'POS', variant: 'green' }} emptyText={lang === 'ar' ? 'لا يوجد بعد' : 'None yet'} lang={lang} />
-                <AppointmentColumn title={lang === 'ar' ? 'لم يحضر' : 'No-show'} count={noShowAppointments.length} items={noShowAppointments} colorClass="text-red-700" dotClass="bg-red-500" badge={{ label: lang === 'ar' ? 'لم يحضر' : 'No-show', variant: 'red' }} emptyText={lang === 'ar' ? 'لا يوجد' : 'None'} lang={lang} />
+                <AppointmentColumn title={lang === 'ar' ? 'محجوز' : 'Booked'} count={scheduledAppointments.length} items={scheduledAppointments} colorClass="text-rose-700" dotClass="bg-blue-400" emptyText={lang === 'ar' ? 'لا يوجد' : 'None'} lang={lang} />
+                <AppointmentColumn title={lang === 'ar' ? 'تم تسجيل الحضور' : 'Checked In'} count={checkedInAppointments.length} items={checkedInAppointments} colorClass="text-rose-700" dotClass="bg-rose-500" badge={{ label: lang === 'ar' ? 'في الكاشير' : 'POS', variant: 'green' }} emptyText={lang === 'ar' ? 'لا يوجد بعد' : 'None yet'} lang={lang} />
+                <AppointmentColumn title={lang === 'ar' ? 'لم يحضر' : 'No-show'} count={noShowAppointments.length} items={noShowAppointments} colorClass="text-rose-700" dotClass="bg-rose-500" badge={{ label: lang === 'ar' ? 'لم يحضر' : 'No-show', variant: 'red' }} emptyText={lang === 'ar' ? 'لا يوجد' : 'None'} lang={lang} />
                 <AppointmentColumn title={lang === 'ar' ? 'مكتمل - تم الدفع' : 'Completed'} count={completedAppointments.length} items={completedAppointments} colorClass="text-gray-600" dotClass="bg-gray-400" badge={{ label: lang === 'ar' ? 'مكتمل' : 'Done', variant: 'gray' }} emptyText={lang === 'ar' ? 'لا يوجد بعد' : 'None yet'} lang={lang} />
               </div>
             )}
@@ -625,34 +734,47 @@ export default function Dashboard() {
           </Card>
         )}
 
-        {/* Expenses pending approval widget */}
+        {/* Expenses summary widget */}
         {isVisible('expenses-pending') && (
-          <Card title={lang === 'ar' ? 'مصاريف بانتظار الاعتماد' : 'Expenses Pending Approval'}>
+          <Card title={lang === 'ar' ? 'المصاريف' : 'Expenses'}>
+            <div className="grid grid-cols-3 divide-x divide-x-reverse divide-gray-100 border-b border-gray-100">
+              <div className="px-4 py-3 text-center">
+                <p className="text-xs text-gray-500">{lang === 'ar' ? 'اليوم' : 'Today'}</p>
+                <p className="mt-1 text-sm font-bold text-gray-900">{totalExpenseAmount.toFixed(2)} AED</p>
+              </div>
+              <div className="px-4 py-3 text-center">
+                <p className="text-xs text-gray-500">{lang === 'ar' ? 'معتمد' : 'Approved'}</p>
+                <p className="mt-1 text-sm font-bold text-rose-700">{approvedExpenseAmount.toFixed(2)} AED</p>
+              </div>
+              <div className="px-4 py-3 text-center">
+                <p className="text-xs text-gray-500">{lang === 'ar' ? 'نقدي مخصوم' : 'Cash Deducted'}</p>
+                <p className="mt-1 text-sm font-bold text-slate-700">{cashExpenseAmount.toFixed(2)} AED</p>
+              </div>
+            </div>
             {(submittedExpenses?.length ?? 0) === 0 ? (
-              <p className="py-8 text-center text-sm text-gray-400">
-                {lang === 'ar' ? 'لا توجد مصاريف معلقة' : 'No pending expenses'}
+              <p className="py-7 text-center text-sm text-gray-400">
+                {lang === 'ar' ? 'لا توجد مصاريف بانتظار الاعتماد' : 'No expenses pending approval'}
               </p>
             ) : (
               <div className="divide-y divide-gray-50">
-                {submittedExpenses!.map((exp) => (
+                {submittedExpenses!.slice(0, 5).map((exp) => (
                   <div key={exp.id} className="flex items-center justify-between px-5 py-3 gap-3">
                     <div className="min-w-0 flex-1">
                       <p className="text-sm font-medium text-gray-900 truncate">{exp.title}</p>
-                      <p className="text-xs text-gray-500 mt-0.5">{exp.category}</p>
+                      <p className="text-xs text-gray-500 mt-0.5">{exp.category} · {exp.paymentMethod === 'cash' ? (lang === 'ar' ? 'نقداً' : 'Cash') : exp.paymentMethod}</p>
                     </div>
                     <div className="text-end flex-shrink-0">
                       <p className="text-sm font-bold text-gray-900">{exp.amount.toFixed(2)} {exp.currencyCode}</p>
-                      <span className={`text-xs font-medium ${exp.status === 'submitted' ? 'text-blue-600' : 'text-gray-500'}`}>
-                        {exp.status === 'submitted' ? (lang === 'ar' ? 'مقدمة' : 'Submitted') : (lang === 'ar' ? 'مسودة' : 'Draft')}
-                      </span>
+                      <span className="text-xs font-medium text-rose-600">{lang === 'ar' ? 'بانتظار الاعتماد' : 'Pending approval'}</span>
                     </div>
                   </div>
                 ))}
-                <div className="px-5 py-3 bg-gray-50 border-t border-gray-100 flex items-center gap-2">
-                  <Receipt size={14} className="text-orange-500" />
-                  <span className="text-xs text-gray-600 font-medium">
-                    {submittedExpenses!.length} {lang === 'ar' ? 'مصروف — اعتمد من صفحة المصاريف' : 'expense(s) — approve in Expenses page'}
+                <div className="px-5 py-3 bg-gray-50 border-t border-gray-100 flex items-center justify-between gap-2">
+                  <span className="inline-flex items-center gap-2 text-xs text-gray-600 font-medium">
+                    <Receipt size={14} className="text-rose-500" />
+                    {submittedExpenses!.length} {lang === 'ar' ? 'مصروف بانتظار الاعتماد' : 'pending expense(s)'}
                   </span>
+                  <span className="text-xs font-bold text-gray-900">{pendingExpenseAmount.toFixed(2)} AED</span>
                 </div>
               </div>
             )}
@@ -665,8 +787,8 @@ export default function Dashboard() {
             <div className="divide-y divide-gray-50">
               {topItems.slice(0, 5).map((item, i) => (
                 <div key={i} className="flex items-center gap-3 px-5 py-3">
-                  <div className="w-7 h-7 bg-blue-100 rounded-lg flex items-center justify-center">
-                    <Package size={14} className="text-blue-600" />
+                  <div className="w-7 h-7 bg-rose-100 rounded-lg flex items-center justify-center">
+                    <Package size={14} className="text-rose-600" />
                   </div>
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-medium text-gray-900 truncate">{item.name}</p>
@@ -688,8 +810,8 @@ export default function Dashboard() {
             <div className="grid grid-cols-1 md:grid-cols-3 divide-y md:divide-y-0 md:divide-x md:divide-x-reverse divide-gray-50">
               {dailyTasks.map(({ label, detail, done, icon: Icon }) => (
                 <div key={label} className="flex items-start gap-3 px-5 py-3">
-                  <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${done ? 'bg-green-50' : 'bg-amber-50'}`}>
-                    {done ? <CheckCircle2 size={16} className="text-green-600" /> : <Icon size={16} className="text-amber-600" />}
+                  <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${done ? 'bg-white' : 'bg-rose-50'}`}>
+                    {done ? <CheckCircle2 size={16} className="text-rose-600" /> : <Icon size={16} className="text-slate-700" />}
                   </div>
                   <div className="min-w-0">
                     <p className="text-sm font-semibold text-gray-900">{label}</p>

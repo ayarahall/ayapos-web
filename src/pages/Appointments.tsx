@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
 import {
@@ -13,7 +13,6 @@ import {
 } from '../api/appointments'
 import { getCustomers, createCustomer } from '../api/customers'
 import { getServices } from '../api/services'
-import { listEmployees } from '../api/employees'
 import { useAuthStore } from '../store/authStore'
 import Card from '../components/ui/Card'
 import Badge from '../components/ui/Badge'
@@ -22,6 +21,7 @@ import Modal from '../components/ui/Modal'
 import Spinner from '../components/ui/Spinner'
 import { addDaysToISODate, addMinutesToDateTimeValue, formatShortDate, formatTime as formatDubaiTime, todayInDubaiISO, toApiLocalDateTime, toDubaiDateTimeValue } from '../utils/date'
 import { upsertPosDraftTab } from '../utils/posDrafts'
+import { loadFeatureSettings, subscribeFeatureSettings } from '../utils/featureSettings'
 
 /* helpers */
 
@@ -137,6 +137,12 @@ export default function Appointments() {
   const [newStatus, setNewStatus] = useState('')
   const [customerMode, setCustomerMode] = useState<'existing' | 'new'>('existing')
   const [newCustomerForm, setNewCustomerForm] = useState({ fullName: '', phone: '' })
+  const [featureSettings, setFeatureSettings] = useState(() => loadFeatureSettings(branchId))
+
+  useEffect(() => {
+    setFeatureSettings(loadFeatureSettings(branchId))
+    return subscribeFeatureSettings(branchId, setFeatureSettings)
+  }, [branchId])
 
   /* queries */
   const { data: listData, isLoading: listLoading } = useQuery({
@@ -157,17 +163,11 @@ export default function Appointments() {
     refetchOnWindowFocus: true,
   })
 
-  const { data: employees } = useQuery({
-    queryKey: ['employees', branchId],
-    queryFn: () => listEmployees(branchId!),
-    enabled: !!branchId && view === 'schedule',
-  })
-
-  const employeeColorByUserId = Object.fromEntries(
-    (employees ?? [])
-      .filter(em => em.appointmentColor)
-      .map(em => [em.id, em.appointmentColor!])
-  )
+  const columnColorByUserId = useMemo(() => Object.fromEntries(
+    (scheduleData?.columns ?? [])
+      .filter(col => col.userId && col.appointmentColor)
+      .map(col => [col.userId!, col.appointmentColor!])
+  ), [scheduleData])
 
   const { data: resources } = useQuery({
     queryKey: ['appointment-resources', slug, branchId ?? 'login-branch'],
@@ -224,7 +224,7 @@ export default function Appointments() {
       const nextStatus = status
       await updateAppointmentStatus(slug, entry.id, nextStatus)
 
-      if (status === 'checked_in' && entry.customerId && entry.serviceId) {
+      if (status === 'checked_in' && featureSettings.appointmentsCheckInCreatesInvoice && entry.customerId && entry.serviceId) {
         const priceCents = Math.round((entry.servicePrice ?? 0) * 100)
         upsertPosDraftTab({
           id: `appointment:${entry.id}`,
@@ -248,7 +248,7 @@ export default function Appointments() {
     },
     onSuccess: ({ status }) => {
       invalidate()
-      if (status === 'checked_in') navigate('/pos')
+      if (status === 'checked_in' && featureSettings.appointmentsCheckInCreatesInvoice) navigate('/pos')
     },
   })
 
@@ -623,7 +623,7 @@ export default function Appointments() {
                       الوقت
                     </div>
                     {visibleColumns.map((col) => {
-                      const colColor = col.userId ? (employeeColorByUserId[col.userId] ?? '#3B82F6') : '#3B82F6'
+                      const colColor = col.appointmentColor ?? (col.userId ? (columnColorByUserId[col.userId] ?? '#E40046') : '#E40046')
                       return (
                         <div key={col.resourceName} className="border-b border-s border-gray-100 px-4 py-3"
                           style={{ backgroundColor: colColor + '18' }}>
@@ -654,7 +654,7 @@ export default function Appointments() {
                     </div>
 
                     {visibleColumns.map((col) => {
-                      const apptColor = col.userId ? (employeeColorByUserId[col.userId] ?? '#3B82F6') : '#3B82F6'
+                      const apptColor = col.appointmentColor ?? (col.userId ? (columnColorByUserId[col.userId] ?? '#E40046') : '#E40046')
                       return (<div
                         key={`${col.resourceName}-timeline`}
                         className="relative border-s border-gray-100 bg-white"
@@ -722,7 +722,7 @@ export default function Appointments() {
                                     <span>✓ تم تسجيل الحضور - في الكاشير</span>
                                   </div>
                                 ) : (
-                                  <div className="mt-2 grid grid-cols-3 gap-2 border-t border-blue-100 pt-2">
+                                  <div className={`mt-2 grid ${featureSettings.appointmentsAllowNoShow && featureSettings.appointmentsAllowCancel ? 'grid-cols-3' : featureSettings.appointmentsAllowNoShow || featureSettings.appointmentsAllowCancel ? 'grid-cols-2' : 'grid-cols-1'} gap-2 border-t border-blue-100 pt-2`}>
                                     <button
                                       type="button"
                                       disabled={markArrivalMut.isPending}
@@ -734,28 +734,32 @@ export default function Appointments() {
                                     >
                                       ✓ سجّل الحضور
                                     </button>
-                                    <button
-                                      type="button"
-                                      disabled={markArrivalMut.isPending}
-                                      onClick={(event) => {
-                                        event.stopPropagation()
-                                        markArrivalMut.mutate({ entry, status: 'no_show' })
-                                      }}
-                                      className="flex items-center justify-center gap-1 rounded-md bg-red-50 border border-red-200 px-2 py-1 text-xs font-semibold text-red-700 hover:bg-red-100 disabled:opacity-50"
-                                    >
-                                      ✗ لم يحضر
-                                    </button>
-                                    <button
-                                      type="button"
-                                      disabled={markArrivalMut.isPending}
-                                      onClick={(event) => {
-                                        event.stopPropagation()
-                                        markArrivalMut.mutate({ entry, status: 'cancelled' })
-                                      }}
-                                      className="flex items-center justify-center gap-1 rounded-md bg-gray-50 border border-gray-200 px-2 py-1 text-xs font-semibold text-gray-700 hover:bg-gray-100 disabled:opacity-50"
-                                    >
-                                      إلغاء
-                                    </button>
+                                    {featureSettings.appointmentsAllowNoShow && (
+                                      <button
+                                        type="button"
+                                        disabled={markArrivalMut.isPending}
+                                        onClick={(event) => {
+                                          event.stopPropagation()
+                                          markArrivalMut.mutate({ entry, status: 'no_show' })
+                                        }}
+                                        className="flex items-center justify-center gap-1 rounded-md bg-red-50 border border-red-200 px-2 py-1 text-xs font-semibold text-red-700 hover:bg-red-100 disabled:opacity-50"
+                                      >
+                                        ✗ لم يحضر
+                                      </button>
+                                    )}
+                                    {featureSettings.appointmentsAllowCancel && (
+                                      <button
+                                        type="button"
+                                        disabled={markArrivalMut.isPending}
+                                        onClick={(event) => {
+                                          event.stopPropagation()
+                                          markArrivalMut.mutate({ entry, status: 'cancelled' })
+                                        }}
+                                        className="flex items-center justify-center gap-1 rounded-md bg-gray-50 border border-gray-200 px-2 py-1 text-xs font-semibold text-gray-700 hover:bg-gray-100 disabled:opacity-50"
+                                      >
+                                        إلغاء
+                                      </button>
+                                    )}
                                   </div>
                                 )}
                               </button>
@@ -980,3 +984,6 @@ export default function Appointments() {
     </div>
   )
 }
+
+
+

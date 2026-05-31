@@ -20,6 +20,7 @@ export default function AppLayout() {
     '/customers': t.nav.customers,
     '/users': t.nav.users,
     '/branches': t.nav.branches,
+    '/tenant-admin': t.nav.tenantAdmin,
     '/reports': t.nav.reports,
     '/settings': t.nav.settings,
   }
@@ -27,7 +28,7 @@ export default function AppLayout() {
   const title = PAGE_TITLES[location.pathname] ?? 'AyaPOS'
 
   return (
-    <div className="flex min-h-screen bg-gray-50">
+    <div className="flex min-h-screen bg-[#fff7f8]">
       <Sidebar />
       <div className="flex-1 flex flex-col min-w-0">
         <Header title={title} />

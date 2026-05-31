@@ -21,11 +21,14 @@ client.interceptors.response.use(
   (r) => r,
   (error) => {
     const status = error.response?.status
+    const method = String(error.config?.method ?? 'get').toLowerCase()
+    const isReadOnlyNotFound = status === 404 && method === 'get'
     if (status === 401) {
       useAuthStore.getState().logout()
       window.location.href = '/login'
-    } else {
+    } else if (!isReadOnlyNotFound) {
       const msg: string =
+        (typeof error.response?.data === 'string' ? error.response.data : undefined) ??
         error.response?.data?.message ??
         error.response?.data?.error ??
         (status === 403 ? 'ليس لديك صلاحية لهذا الإجراء' :

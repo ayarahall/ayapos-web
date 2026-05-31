@@ -15,6 +15,7 @@ import Button from '../components/ui/Button'
 import Modal from '../components/ui/Modal'
 import Spinner from '../components/ui/Spinner'
 import { formatDate, todayInDubaiISO } from '../utils/date'
+import { getApiErrorMessage } from '../api/errors'
 
 /* ── constants ── */
 
@@ -35,6 +36,7 @@ const STATUS_VARIANT: Record<string, 'gray' | 'blue' | 'green' | 'yellow' | 'red
 }
 
 const ALL_STATUSES = ['draft', 'submitted', 'approved', 'paid', 'cancelled']
+const CAN_APPROVE_EXPENSES = new Set(['OWNER', 'ADMIN', 'TENANT', 'BRANCH_MANAGER', 'HR'])
 
 const COMMON_CATEGORIES = [
   'إيجار', 'مرافق', 'رواتب', 'تسويق', 'صيانة',
@@ -51,13 +53,14 @@ interface ExpenseForm {
   customCategory: string
   amount: string
   currencyCode: string
+  paymentMethod: string
   expenseDate: string
   notes: string
 }
 
 const emptyForm = (): ExpenseForm => ({
   title: '', category: '', customCategory: '',
-  amount: '', currencyCode: 'AED',
+  amount: '', currencyCode: 'AED', paymentMethod: 'cash',
   expenseDate: todayInDubaiISO(),
   notes: '',
 })
@@ -67,6 +70,9 @@ export default function Expenses() {
   const qc = useQueryClient()
   const { user, branchId } = useAuthStore()
   const slug = user?.tenantSlug ?? ''
+  const canApproveExpenses = user?.permissionsConfigured
+    ? (user.permissions ?? []).includes('expenses.approve')
+    : CAN_APPROVE_EXPENSES.has(user?.role ?? '')
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   /* list state */
@@ -111,6 +117,7 @@ export default function Expenses() {
         category: cat,
         amount: parseFloat(f.amount),
         currencyCode: f.currencyCode,
+        paymentMethod: f.paymentMethod,
         expenseDate: new Date(f.expenseDate).toISOString(),
         notes: f.notes || undefined,
       })
@@ -129,8 +136,22 @@ export default function Expenses() {
     },
   })
 
+  const submitMut = useMutation({
+    mutationFn: (expenseId: string) => updateExpenseStatus(slug, expenseId, 'submitted'),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['expenses', slug, branchId ?? 'login-branch'] })
+    },
+  })
+
   const approveMut = useMutation({
     mutationFn: (expenseId: string) => updateExpenseStatus(slug, expenseId, 'approved'),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['expenses', slug, branchId ?? 'login-branch'] })
+    },
+  })
+
+  const rejectMut = useMutation({
+    mutationFn: (expenseId: string) => updateExpenseStatus(slug, expenseId, 'cancelled'),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['expenses', slug, branchId ?? 'login-branch'] })
     },
@@ -157,8 +178,8 @@ export default function Expenses() {
       }))
       setAiConfidence(result.confidence)
       setAiVendor(result.vendorName)
-    } catch {
-      alert('فشل تحليل الفاتورة. يرجى التحقق من الصورة والمحاولة مرة أخرى.')
+    } catch (err) {
+      alert(getApiErrorMessage(err, 'فشل تحليل الفاتورة. يرجى التحقق من الصورة والمحاولة مرة أخرى.'))
     } finally {
       setAiLoading(false)
       if (fileInputRef.current) fileInputRef.current.value = ''
@@ -304,16 +325,36 @@ export default function Expenses() {
                       {exp.notes || '—'}
                     </td>
                     <td className="px-4 py-3">
-                      {exp.status === 'submitted' && (
-                        <button
-                          onClick={() => approveMut.mutate(exp.id)}
-                          disabled={approveMut.isPending}
-                          className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-medium bg-green-50 text-green-700 border border-green-200 hover:bg-green-100 disabled:opacity-50 transition-colors"
-                        >
-                          <Check size={12} />
-                          اعتماد
-                        </button>
-                      )}
+                      <div className="flex items-center gap-2">
+                        {exp.status === 'draft' && (
+                          <button
+                            onClick={() => submitMut.mutate(exp.id)}
+                            disabled={submitMut.isPending}
+                            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-medium bg-blue-50 text-blue-700 border border-blue-200 hover:bg-blue-100 disabled:opacity-50 transition-colors"
+                          >
+                            إرسال للاعتماد
+                          </button>
+                        )}
+                        {exp.status === 'submitted' && canApproveExpenses && (
+                          <>
+                            <button
+                              onClick={() => approveMut.mutate(exp.id)}
+                              disabled={approveMut.isPending}
+                              className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-medium bg-green-50 text-green-700 border border-green-200 hover:bg-green-100 disabled:opacity-50 transition-colors"
+                            >
+                              <Check size={12} />
+                              اعتماد
+                            </button>
+                            <button
+                              onClick={() => rejectMut.mutate(exp.id)}
+                              disabled={rejectMut.isPending}
+                              className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-medium bg-red-50 text-red-700 border border-red-200 hover:bg-red-100 disabled:opacity-50 transition-colors"
+                            >
+                              رفض
+                            </button>
+                          </>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -511,6 +552,26 @@ export default function Expenses() {
             </div>
           </div>
 
+          {/* Payment method */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              طريقة الدفع <span className="text-red-500">*</span>
+            </label>
+            <select
+              required
+              value={form.paymentMethod}
+              onChange={f('paymentMethod')}
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+            >
+              <option value="cash">نقداً - من الكاش المتوفر</option>
+              <option value="card">بطاقة</option>
+              <option value="transfer">تحويل</option>
+            </select>
+            {form.paymentMethod === 'cash' && (
+              <p className="text-xs text-amber-600 mt-1">سيتم خصم المبلغ من الكاش المتوفر بعد اعتماد المصروف.</p>
+            )}
+          </div>
+
           {/* Date */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -550,7 +611,7 @@ export default function Expenses() {
           {createMut.isError && (
             <div className="flex items-center gap-2 bg-red-50 border border-red-200 rounded-lg px-4 py-3 text-sm text-red-700">
               <AlertCircle size={15} />
-              حدث خطأ أثناء الحفظ. يرجى المحاولة مرة أخرى.
+              {getApiErrorMessage(createMut.error, 'حدث خطأ أثناء الحفظ. يرجى المحاولة مرة أخرى.')}
             </div>
           )}
         </form>

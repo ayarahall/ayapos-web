@@ -118,6 +118,7 @@ export interface CashierSession {
   totalCardCents: number
   totalTransferCents: number
   totalRefundCents: number
+  cashExpenseCents?: number
   expectedCashCents: number
   actualCashCents?: number
   differenceCents?: number

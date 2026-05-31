@@ -1,4 +1,6 @@
-import client from './client'
+﻿import client from './client'
+import { useAuthStore } from '../store/authStore'
+import { getTenantBranches as getPublicTenantBranches } from './auth'
 
 export interface TenantSummary {
   id: string
@@ -77,8 +79,23 @@ export async function getTenantSummary(): Promise<TenantSummary> {
 }
 
 export async function getTenantBranches(): Promise<TenantBranch[]> {
-  const res = await client.get<TenantBranch[]>('/tenant-admin/branches')
-  return res.data
+  const tenantSlug = useAuthStore.getState().user?.tenantSlug?.trim()
+
+  try {
+    const res = await client.get<TenantBranch[]>('/tenant-admin/branches')
+    if (res.data.length > 0 || !tenantSlug) return res.data
+  } catch (error) {
+    if (!tenantSlug) throw error
+  }
+
+  const publicBranches = await getPublicTenantBranches(tenantSlug)
+  const tenantId = useAuthStore.getState().user?.tenantId ?? ''
+  return publicBranches.map((branch) => ({
+    ...branch,
+    tenantId: branch.tenantId ?? tenantId,
+    isActive: branch.isActive ?? true,
+    assignedUsers: branch.assignedUsers ?? 0,
+  }))
 }
 
 export async function createTenantAdminBranch(payload: {

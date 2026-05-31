@@ -9,6 +9,8 @@ export interface Expense {
   currencyCode: string
   expenseDate: string
   status: string
+  paymentMethod: string
+  paidAt?: string
   notes: string
   createdAt: string
 }
@@ -32,7 +34,7 @@ export interface AiStatus {
 
 export async function getExpenses(
   tenantSlug: string,
-  params: { page?: number; pageSize?: number; category?: string; q?: string } = {}
+  params: { page?: number; pageSize?: number; category?: string; status?: string; q?: string } = {}
 ): Promise<PagedResult<Expense>> {
   const res = await client.get<PagedResult<Expense>>(
     `/t/${tenantSlug}/expenses`,
@@ -53,6 +55,7 @@ export async function createExpense(
     category: string
     amount: number
     currencyCode?: string
+    paymentMethod?: string
     expenseDate: string
     notes?: string
   }

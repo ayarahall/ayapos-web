@@ -1,8 +1,8 @@
-import { NavLink } from 'react-router-dom'
+﻿import { NavLink } from 'react-router-dom'
 import {
   LayoutDashboard, ShoppingCart, FileText, Package, Wrench,
   CalendarDays, Receipt, Tag, Users, UserCog, Building2,
-  BarChart3, Settings, LogOut, Store, LayoutPanelTop, Bell,
+  BarChart3, Settings, LogOut, Bell, LayoutPanelTop,
 } from 'lucide-react'
 import { useQuery } from '@tanstack/react-query'
 import { useAuthStore } from '../../store/authStore'
@@ -24,7 +24,7 @@ const navItems = [
   { to: '/categories', icon: Tag, key: 'categories', tenantOnly: true },
   { to: '/customers', icon: Users, key: 'customers', tenantOnly: true, permissionKey: 'customers' },
   { to: '/users', icon: UserCog, key: 'users', permissionKey: 'users' },
-  { to: '/branches', icon: Building2, key: 'branches', permissionKey: 'branches' },
+  { to: '/branches', icon: Building2, key: 'branches', platformOnly: true, permissionKey: 'branches' },
   { to: '/reports', icon: BarChart3, key: 'reports', tenantOnly: true, permissionKey: 'reports' },
   { to: '/inbox', icon: Bell, key: 'inbox', tenantOnly: true },
   { to: '/settings', icon: Settings, key: 'settings' },
@@ -36,21 +36,25 @@ export default function Sidebar() {
   const { user, branchId, setBranchId, logout } = useAuthStore()
   const t = useT()
 
+  const slug = user?.tenantSlug ?? ''
+  const canManageTenant = user?.scope === 'tenant' && ADMIN_ROLES.includes(user?.role ?? '')
+
   const branchesQuery = useQuery({
-    queryKey: ['tenant-admin-branches'],
+    queryKey: ['tenant-admin-branches', slug],
     queryFn: getTenantBranches,
-    enabled: user?.role === 'TENANT',
+    enabled: canManageTenant && !!slug,
   })
 
-  const slug = user?.tenantSlug ?? ''
-  const canApproveExpenses = CAN_APPROVE_EXPENSES.has(user?.role ?? '')
+  const canApproveExpenses = user?.permissionsConfigured
+    ? (user.permissions ?? []).includes('expenses.approve')
+    : CAN_APPROVE_EXPENSES.has(user?.role ?? '')
 
   const { data: submittedExpenses } = useQuery({
     queryKey: ['expenses', slug, branchId ?? 'login-branch', 'inbox-submitted'],
-    queryFn: () => getExpenses(slug, { page: 1, pageSize: 50 }),
+    queryFn: () => getExpenses(slug, { page: 1, pageSize: 50, status: 'submitted' }),
     enabled: !!slug && canApproveExpenses,
     staleTime: 30_000,
-    select: (d) => d.items.filter((e: { status: string }) => e.status === 'submitted'),
+    select: (d) => d.items,
   })
 
   const inboxBadge = submittedExpenses?.length ?? 0
@@ -61,7 +65,8 @@ export default function Sidebar() {
 
   const visibleItems = navItems.filter((item) => {
     if (item.tenantOnly && user?.scope !== 'tenant') return false
-    if (item.tenantAdminOnly && user?.role !== 'TENANT') return false
+    if (item.platformOnly && user?.scope !== 'platform') return false
+    if (item.tenantAdminOnly && (user?.scope !== 'tenant' || !isAdmin)) return false
     if (item.tenantAdminHide && user?.role === 'TENANT') return false
     if (item.permissionKey && permissionsConfigured && !isAdmin) {
       if (!userPermissions.includes(item.permissionKey)) return false
@@ -79,32 +84,32 @@ export default function Sidebar() {
     user?.role ?? ''
 
   return (
-    <aside className="w-64 min-h-screen bg-slate-900 flex flex-col">
+    <aside className="w-64 min-h-screen bg-white border-e border-rose-100 flex flex-col shadow-sm">
       {/* Logo */}
-      <div className="flex items-center gap-3 px-6 py-5 border-b border-slate-700">
-        <div className="w-9 h-9 bg-blue-600 rounded-xl flex items-center justify-center">
-          <Store size={20} className="text-white" />
+      <div className="flex items-center gap-3 px-6 py-5 border-b border-rose-100">
+        <div className="w-12 h-12 flex items-center justify-center">
+          <img src="/ayapos-logo.png?v=5" alt="AyaPOS" className="h-12 w-12 object-contain" />
         </div>
         <div>
-          <p className="text-white font-bold text-base leading-none">AyaPOS</p>
-          <p className="text-slate-400 text-xs mt-0.5">{t.nav.pos}</p>
+          <p className="text-slate-950 font-bold text-base leading-none">AyaPOS</p>
+          <p className="text-slate-500 text-xs mt-0.5">{t.nav.pos}</p>
         </div>
       </div>
 
       {/* Branch info / switcher */}
       {user?.scope === 'tenant' && (
-        <div className="px-4 py-3 mx-3 mt-3 bg-slate-800 rounded-lg space-y-2">
+        <div className="px-4 py-3 mx-3 mt-3 bg-rose-50 rounded-lg space-y-2 border border-rose-100">
           <div>
-            <p className="text-slate-400 text-xs">{t.nav.tenant}</p>
-            <p className="text-white text-sm font-medium">{user.tenantSlug}</p>
+            <p className="text-slate-500 text-xs">{t.nav.tenant}</p>
+            <p className="text-slate-900 text-sm font-medium">{user.tenantSlug}</p>
           </div>
-          {user.role === 'TENANT' && branchesQuery.data && (
+          {canManageTenant && branchesQuery.data && (
             <div>
-              <p className="text-slate-400 text-xs mb-1">{t.nav.activeBranch}</p>
+              <p className="text-slate-500 text-xs mb-1">{t.nav.activeBranch}</p>
               <select
                 value={branchId ?? ''}
                 onChange={e => setBranchId(e.target.value || null)}
-                className="w-full bg-slate-700 text-white text-xs rounded-lg px-2 py-1.5 border border-slate-600 focus:outline-none focus:border-blue-500"
+                className="w-full bg-white text-slate-800 text-xs rounded-lg px-2 py-1.5 border border-rose-200 focus:outline-none focus:border-rose-500"
               >
                 <option value="">{t.nav.noBranchSelected}</option>
                 {branchesQuery.data.map(b => (
@@ -125,8 +130,8 @@ export default function Sidebar() {
             className={({ isActive }) =>
               `flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors
               ${isActive
-                ? 'bg-blue-600 text-white'
-                : 'text-slate-300 hover:bg-slate-800 hover:text-white'
+                ? 'bg-rose-600 text-white'
+                : 'text-slate-700 hover:bg-rose-50 hover:text-rose-700'
               }`
             }
           >
@@ -142,15 +147,15 @@ export default function Sidebar() {
       </nav>
 
       {/* User + Logout */}
-      <div className="px-3 py-4 border-t border-slate-700">
+      <div className="px-3 py-4 border-t border-rose-100">
         <div className="px-3 py-2 mb-2">
-          <p className="text-white text-sm font-medium">{user?.username}</p>
-          <p className="text-slate-400 text-xs">{roleLabel}</p>
+          <p className="text-slate-900 text-sm font-medium">{user?.username}</p>
+          <p className="text-slate-500 text-xs">{roleLabel}</p>
         </div>
         <button
           onClick={logout}
           className="flex items-center gap-3 w-full px-3 py-2.5 rounded-lg text-sm font-medium
-            text-slate-300 hover:bg-red-900/30 hover:text-red-400 transition-colors"
+            text-slate-600 hover:bg-rose-50 hover:text-rose-700 transition-colors"
         >
           <LogOut size={18} />
           {t.nav.logout}

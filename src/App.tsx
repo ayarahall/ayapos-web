@@ -28,6 +28,11 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
   return <>{children}</>
 }
 
+function BranchManagementRoute() {
+  const user = useAuthStore((s) => s.user)
+  return user?.scope === 'platform' ? <Branches /> : <Navigate to="/tenant-admin" replace />
+}
+
 /**
  * PermissionGuard — wraps sensitive routes.
  *
@@ -166,7 +171,7 @@ export default function App() {
             path="branches"
             element={
               <PermissionGuard permissionKey="branches">
-                <Branches />
+                <BranchManagementRoute />
               </PermissionGuard>
             }
           />
@@ -179,7 +184,7 @@ export default function App() {
             }
           />
           <Route path="categories" element={<Categories />} />
-          <Route path="tenant-admin" element={<TenantAdmin />} />
+          <Route path="tenant-admin" element={<PermissionGuard adminOnly><TenantAdmin /></PermissionGuard>} />
           <Route path="inbox" element={<Inbox />} />
         </Route>
         <Route path="*" element={<Navigate to="/dashboard" replace />} />

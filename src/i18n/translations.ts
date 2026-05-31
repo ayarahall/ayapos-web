@@ -1,4 +1,4 @@
-const ar = {
+﻿const ar = {
   common: {
     add: 'إضافة', edit: 'تعديل', save: 'حفظ', saved: 'تم الحفظ', done: 'تم', cancel: 'إلغاء',
     delete: 'حذف', search: 'بحث...', loading: 'جاري التحميل...',
@@ -21,7 +21,7 @@ const ar = {
     customers: 'العملاء', users: 'المستخدمون',
     branches: 'الفروع', reports: 'التقارير',
     settings: 'الإعدادات', logout: 'تسجيل الخروج',
-    tenant: 'المستأجر', tenantAdmin: 'إدارة الفروع',
+    tenant: 'المستأجر', tenantAdmin: 'الإعدادات والصلاحيات',
     activeBranch: 'الفرع النشط', noBranchSelected: '-- اختر فرعاً --',
     inbox: 'الصندوق الوارد',
   },
@@ -229,11 +229,11 @@ const ar = {
     allStatuses: 'كل الحالات',
   },
   tenantAdmin: {
-    title: 'إدارة الفروع', addBranch: 'إضافة فرع', noBranches: 'لا توجد فروع بعد',
+    title: 'الإعدادات والصلاحيات', addBranch: 'إضافة فرع', noBranches: 'لا توجد فروع بعد',
     workspace: 'مساحة العمل', users: 'المستخدمون', products: 'المنتجات', services: 'الخدمات',
     branchSettings: 'بيانات الفرع', printSettings: 'إعدادات الطباعة',
     saveBranch: 'حفظ الفرع', savePrint: 'حفظ إعدادات الطباعة',
-    addUser: 'إضافة مستخدم', noUsers: 'لا يوجد مستخدمون لهذا الفرع',
+    addUser: 'إضافة مستخدم', noUsers: 'لا يوجد مستخدمون لهذا المستأجر',
     importServices: 'استيراد الخدمات (Excel/CSV)', importFile: 'اختر ملف',
     importResult: 'نتيجة الاستيراد', created: 'أضيف', updated: 'حُدِّث', skipped: 'تجاوَز',
     licensePlan: 'خطة الترخيص', licenseStatus: 'حالة الترخيص',
@@ -326,7 +326,7 @@ const en = {
     customers: 'Customers', users: 'Users',
     branches: 'Branches', reports: 'Reports',
     settings: 'Settings', logout: 'Logout',
-    tenant: 'Tenant', tenantAdmin: 'Branch Admin',
+    tenant: 'Tenant', tenantAdmin: 'Settings & Permissions',
     activeBranch: 'Active Branch', noBranchSelected: '-- Select Branch --',
   },
   login: {
@@ -533,11 +533,11 @@ const en = {
     allStatuses: 'All Statuses',
   },
   tenantAdmin: {
-    title: 'Branch Admin', addBranch: 'Add Branch', noBranches: 'No branches yet',
+    title: 'Settings & Permissions', addBranch: 'Add Branch', noBranches: 'No branches yet',
     workspace: 'Workspace', users: 'Users', products: 'Products', services: 'Services',
     branchSettings: 'Branch Settings', printSettings: 'Print Settings',
     saveBranch: 'Save Branch', savePrint: 'Save Print Settings',
-    addUser: 'Add User', noUsers: 'No users in this branch',
+    addUser: 'Add User', noUsers: 'No users in this tenant',
     importServices: 'Import Services (Excel/CSV)', importFile: 'Choose File',
     importResult: 'Import Result', created: 'Created', updated: 'Updated', skipped: 'Skipped',
     licensePlan: 'License Plan', licenseStatus: 'License Status',

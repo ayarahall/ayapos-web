@@ -7,7 +7,7 @@ import {
   updateBranchUserPermissions, updateBranchUserLicense,
   getPrintSettings, updatePrintSettings, updateBranch,
   importBranchServices,
-  type TenantBranch, type BranchUser, type PrintSettings, type ServiceImportResult,
+  type TenantBranch, type BranchUser, type PrintSettings, type ServiceImportResult, type TenantSummary,
 } from '../api/tenantAdmin'
 import { getProducts, createProduct, updateProduct, deleteProduct } from '../api/products'
 import { getServices, createService, updateService, deleteService } from '../api/services'
@@ -16,8 +16,9 @@ import { useT } from '../i18n/useT'
 import Modal from '../components/ui/Modal'
 import PermissionEditor from '../components/ui/PermissionEditor'
 import type { ProductListItem, ServiceListItem } from '../types'
-import EmployeesTab from './Employees'
 import { useToastStore } from '../store/toastStore'
+import { loadPosSettings, savePosSettings, type PosSettings } from '../utils/posSettings'
+import { loadFeatureSettings, saveFeatureSettings, type FeatureSettings } from '../utils/featureSettings'
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -43,6 +44,7 @@ function RoleBadge({ role }: { role: string }) {
 function StatusDot({ active }: { active: boolean }) {
   return <span className={`inline-block w-2 h-2 rounded-full ${active ? 'bg-green-500' : 'bg-slate-400'}`} />
 }
+
 
 // ─── Workspace Tab ───────────────────────────────────────────────────────────
 
@@ -186,7 +188,7 @@ function WorkspaceTab({ branch }: { branch: TenantBranch }) {
 
 // ─── Users Tab ───────────────────────────────────────────────────────────────
 
-function UsersTab({ branch }: { branch: TenantBranch }) {
+function UsersTab({ branch, summary }: { branch: TenantBranch; summary?: TenantSummary }) {
   const t = useT()
   const ta = t.tenantAdmin
   const qc = useQueryClient()
@@ -213,7 +215,7 @@ function UsersTab({ branch }: { branch: TenantBranch }) {
       }
       return created
     },
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['branch-users', branch.id] }); setShowAdd(false); setAddForm({ username: '', role: 'CASHIER', password: '', pin: '' }); setAddPerms([]); toast.success(`✓ ${ta.addUser}`) },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['branch-users', branch.id] }); qc.invalidateQueries({ queryKey: ['tenant-summary'] }); setShowAdd(false); setAddForm({ username: '', role: 'CASHIER', password: '', pin: '' }); setAddPerms([]); toast.success(`✓ ${ta.addUser}`) },
   })
 
   const pwdMut = useMutation({
@@ -245,16 +247,29 @@ function UsersTab({ branch }: { branch: TenantBranch }) {
   })
 
   const users = usersQuery.data ?? []
+  const licenseLimitReached = summary ? summary.assignedUsers >= summary.maxUsers : false
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-4">
-        <span className="text-sm text-slate-500">{users.length} {ta.users.toLowerCase()}</span>
-        <button onClick={() => setShowAdd(true)}
-          className="flex items-center gap-1.5 bg-blue-600 text-white px-3 py-1.5 rounded-lg text-sm hover:bg-blue-700">
+      <div className="flex items-center justify-between gap-3 mb-4">
+        <div>
+          <span className="text-sm text-slate-500">{users.length} {ta.users.toLowerCase()}</span>
+          {summary && (
+            <p className={`mt-1 text-xs ${licenseLimitReached ? 'text-red-600' : 'text-slate-500'}`}>
+              {t.users.title}: {summary.assignedUsers} / {summary.maxUsers} · {ta.licensePlan}: {summary.licensePlan} · {ta.licenseStatus}: {summary.licenseStatus}
+            </p>
+          )}
+        </div>
+        <button onClick={() => setShowAdd(true)} disabled={licenseLimitReached}
+          className="flex items-center gap-1.5 bg-blue-600 text-white px-3 py-1.5 rounded-lg text-sm hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed">
           <Plus size={14} /> {ta.addUser}
         </button>
       </div>
+      {licenseLimitReached && (
+        <div className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+          وصلت الرخصة إلى الحد الأقصى للمستخدمين. ارفع الحد من تفاصيل الرخصة قبل إضافة مستخدم جديد.
+        </div>
+      )}
 
       {usersQuery.isLoading ? (
         <p className="text-slate-500 text-sm">{t.common.loading}</p>
@@ -334,7 +349,7 @@ function UsersTab({ branch }: { branch: TenantBranch }) {
 
           {addMut.isError && <p className="text-red-600 text-sm">{t.common.error}</p>}
           <div className="flex gap-2 pt-2">
-            <button onClick={() => addMut.mutate()} disabled={addMut.isPending}
+            <button onClick={() => addMut.mutate()} disabled={addMut.isPending || licenseLimitReached}
               className="flex-1 bg-blue-600 text-white py-2 rounded-lg text-sm hover:bg-blue-700 disabled:opacity-50">
               {addMut.isPending ? t.common.loading : t.common.add}
             </button>
@@ -771,9 +786,110 @@ function ServicesTab({ tenantSlug, branchId }: { tenantSlug: string; branchId: s
   )
 }
 
+// ─── Feature Settings Tabs ──────────────────────────────────────────────────
+
+function ToggleSetting({
+  title,
+  description,
+  checked,
+  onChange,
+}: {
+  title: string
+  description: string
+  checked: boolean
+  onChange: (checked: boolean) => void
+}) {
+  return (
+    <label className={`flex items-start justify-between gap-4 rounded-xl border px-4 py-3 cursor-pointer transition-colors ${checked ? 'border-rose-200 bg-rose-50' : 'border-slate-200 bg-white hover:bg-slate-50'}`}>
+      <span>
+        <span className="block text-sm font-semibold text-slate-800">{title}</span>
+        <span className="mt-1 block text-xs text-slate-500 leading-5">{description}</span>
+      </span>
+      <span className={`relative mt-1 h-6 w-11 rounded-full transition-colors ${checked ? 'bg-rose-600' : 'bg-slate-300'}`}>
+        <span className={`absolute top-1 h-4 w-4 rounded-full bg-white shadow transition-transform ${checked ? 'translate-x-6' : 'translate-x-1'}`} />
+        <input type="checkbox" className="sr-only" checked={checked} onChange={e => onChange(e.target.checked)} />
+      </span>
+    </label>
+  )
+}
+
+function FeatureSettingsTab({ branch, feature }: { branch: TenantBranch; feature: 'appointments' | 'expenses' | 'pos' }) {
+  const [settings, setSettings] = useState<FeatureSettings>(() => loadFeatureSettings(branch.id))
+  const [saved, setSaved] = useState(false)
+
+  useEffect(() => {
+    setSettings(loadFeatureSettings(branch.id))
+  }, [branch.id])
+
+  const update = (patch: Partial<FeatureSettings>) => {
+    const next = { ...settings, ...patch }
+    setSettings(next)
+    saveFeatureSettings(branch.id, next)
+
+    if ('posRequirePaymentReference' in patch || 'posRequireAppointment' in patch || 'posAutoPrintReceipt' in patch) {
+      const currentPos = loadPosSettings(branch.id)
+      const nextPos: PosSettings = {
+        ...currentPos,
+        requirePaymentReference: next.posRequirePaymentReference,
+        requireAppointment: next.posRequireAppointment,
+      }
+      savePosSettings(branch.id, nextPos)
+    }
+
+    setSaved(true)
+    window.setTimeout(() => setSaved(false), 1800)
+  }
+
+  const title = feature === 'appointments' ? 'إعدادات المواعيد' : feature === 'expenses' ? 'إعدادات المصاريف' : 'إعدادات نقطة البيع'
+  const description = feature === 'appointments'
+    ? 'تحكم بسلوك الحجز والحضور وربط الموعد بالفاتورة بدون تنفيذ حجز من شاشة الإدارة.'
+    : feature === 'expenses'
+      ? 'تحكم بموافقات المصاريف وطريقة خصم الكاش والتنبيهات بدون إدخال مصروف من شاشة الإدارة.'
+      : 'تحكم بقواعد الدفع والفواتير والتبويبات في نقطة البيع.'
+
+  return (
+    <div className="space-y-4">
+      <div className="rounded-xl border border-rose-100 bg-rose-50 px-4 py-3">
+        <p className="text-sm font-bold text-slate-900">{title}</p>
+        <p className="mt-1 text-xs text-slate-600">{branch.name} · {description}</p>
+      </div>
+
+      {saved && <div className="rounded-lg border border-green-200 bg-green-50 px-4 py-2 text-sm text-green-700">تم حفظ الإعدادات</div>}
+
+      {feature === 'appointments' && (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <ToggleSetting title="إلزام اختيار العميل" description="لا يتم إنشاء الموعد إلا إذا كان مربوطاً بعميل معروف." checked={settings.appointmentsRequireCustomer} onChange={v => update({ appointmentsRequireCustomer: v })} />
+          <ToggleSetting title="منع تضارب المواعيد" description="يمنع حفظ موعد يتداخل مع موعد آخر لنفس الموظفة." checked={settings.appointmentsPreventOverlap} onChange={v => update({ appointmentsPreventOverlap: v })} />
+          <ToggleSetting title="تحديث عدم الحضور تلقائياً" description="إذا انتهى وقت الموعد ولم يتم تسجيل حضور، يظهر كـ لم يحضر." checked={settings.appointmentsAutoNoShow} onChange={v => update({ appointmentsAutoNoShow: v })} />
+          <ToggleSetting title="إنشاء فاتورة عند تسجيل الحضور" description="عند تسجيل حضور العميل تفتح فاتورة/تاب في نقطة البيع تلقائياً." checked={settings.appointmentsCheckInCreatesInvoice} onChange={v => update({ appointmentsCheckInCreatesInvoice: v })} />
+          <ToggleSetting title="إظهار خيار لم يحضر" description="يسمح للموظف بتعليم الموعد كعدم حضور من جدول المواعيد." checked={settings.appointmentsAllowNoShow} onChange={v => update({ appointmentsAllowNoShow: v })} />
+          <ToggleSetting title="إظهار خيار إلغاء الموعد" description="يسمح للموظف بإلغاء الموعد من جدول المواعيد حسب الصلاحيات." checked={settings.appointmentsAllowCancel} onChange={v => update({ appointmentsAllowCancel: v })} />
+        </div>
+      )}
+
+      {feature === 'expenses' && (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <ToggleSetting title="المصاريف تحتاج اعتماد" description="المصروف ينتقل لصندوق الوارد حتى يعتمده المسؤول." checked={settings.expensesRequireApproval} onChange={v => update({ expensesRequireApproval: v })} />
+          <ToggleSetting title="خصم المصروف النقدي من الكاش" description="إذا كانت طريقة الدفع كاش يتم خصم المبلغ من النقد المتوفر." checked={settings.expensesDeductCash} onChange={v => update({ expensesDeductCash: v })} />
+          <ToggleSetting title="تنبيه المسؤولين" description="إظهار إشعار عند وجود مصروفات بانتظار الاعتماد." checked={settings.expensesNotifyApprovers} onChange={v => update({ expensesNotifyApprovers: v })} />
+          <ToggleSetting title="مساعدة الذكاء الاصطناعي" description="إتاحة اقتراح التصنيف والوصف عند توفر مفتاح OpenAI." checked={settings.expensesAllowAiAssist} onChange={v => update({ expensesAllowAiAssist: v })} />
+        </div>
+      )}
+
+      {feature === 'pos' && (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <ToggleSetting title="طلب رقم المرجع" description="يطلب رقم العملية عند الدفع بالبطاقة أو التحويل." checked={settings.posRequirePaymentReference} onChange={v => update({ posRequirePaymentReference: v })} />
+          <ToggleSetting title="الفاتورة تحتاج موعد/حضور" description="لا يسمح بإنشاء فاتورة بدون موعد أو تسجيل حضور إذا كان الخيار فعالاً." checked={settings.posRequireAppointment} onChange={v => update({ posRequireAppointment: v })} />
+          <ToggleSetting title="طباعة تلقائية بعد الدفع" description="يفتح خيار الطباعة مباشرة بعد اكتمال الدفع." checked={settings.posAutoPrintReceipt} onChange={v => update({ posAutoPrintReceipt: v })} />
+          <ToggleSetting title="تفعيل تبويبات الفواتير" description="يسمح بوجود أكثر من فاتورة مفتوحة لنفس الوقت في نقطة البيع." checked={settings.posAllowMultipleInvoiceTabs} onChange={v => update({ posAllowMultipleInvoiceTabs: v })} />
+        </div>
+      )}
+    </div>
+  )
+}
 // ─── Main Page ───────────────────────────────────────────────────────────────
 
-type SubTab = 'workspace' | 'users' | 'products' | 'services' | 'employees'
+type SubTab = 'workspace' | 'users' | 'products' | 'services' | 'appointmentSettings' | 'expenseSettings' | 'posSettings'
 
 export default function TenantAdmin() {
   const t = useT()
@@ -792,7 +908,7 @@ export default function TenantAdmin() {
   })
 
   const branchesQuery = useQuery({
-    queryKey: ['tenant-admin-branches'],
+    queryKey: ['tenant-admin-branches', user?.tenantSlug ?? ''],
     queryFn: getTenantBranches,
   })
 
@@ -818,11 +934,13 @@ export default function TenantAdmin() {
   const summary = summaryQuery.data
 
   const subTabs: { key: SubTab; label: string }[] = [
-    { key: 'workspace', label: ta.workspace },
-    { key: 'users', label: ta.users },
-    { key: 'products', label: ta.products },
-    { key: 'services', label: ta.services },
-    { key: 'employees', label: ta.employees },
+    { key: 'workspace', label: 'إعدادات الفرع والطباعة' },
+    { key: 'users', label: 'المستخدمون والصلاحيات' },
+    { key: 'products', label: 'إعدادات المنتجات' },
+    { key: 'services', label: 'إعدادات الخدمات' },
+    { key: 'appointmentSettings', label: 'إعدادات المواعيد' },
+    { key: 'expenseSettings', label: 'إعدادات المصاريف' },
+    { key: 'posSettings', label: 'إعدادات نقطة البيع' },
   ]
 
   return (
@@ -911,10 +1029,12 @@ export default function TenantAdmin() {
             </div>
 
             {subTab === 'workspace' && <WorkspaceTab branch={activeBranch} />}
-            {subTab === 'users' && <UsersTab branch={activeBranch} />}
+            {subTab === 'users' && <UsersTab branch={activeBranch} summary={summary} />}
             {subTab === 'products' && user && <ProductsTab tenantSlug={user.tenantSlug} />}
             {subTab === 'services' && user && <ServicesTab tenantSlug={user.tenantSlug} branchId={activeBranch.id} />}
-            {subTab === 'employees' && <EmployeesTab branchId={activeBranch.id} />}
+            {subTab === 'appointmentSettings' && <FeatureSettingsTab branch={activeBranch} feature="appointments" />}
+            {subTab === 'expenseSettings' && <FeatureSettingsTab branch={activeBranch} feature="expenses" />}
+            {subTab === 'posSettings' && <FeatureSettingsTab branch={activeBranch} feature="pos" />}
           </div>
         ) : (
           <div className="p-10 text-center text-slate-400 text-sm">{ta.noBranches}</div>
@@ -955,3 +1075,5 @@ export default function TenantAdmin() {
     </div>
   )
 }
+
+
