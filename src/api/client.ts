@@ -3,7 +3,7 @@ import { useAuthStore } from '../store/authStore'
 import { useToastStore } from '../store/toastStore'
 
 const client = axios.create({
-  baseURL: import.meta.env.VITE_API_BASE_URL ?? '/api',
+  baseURL: import.meta.env.VITE_API_BASE_URL || 'https://ayapos-api.onrender.com',
   headers: { 'Content-Type': 'application/json' },
 })
 

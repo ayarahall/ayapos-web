@@ -18,7 +18,7 @@ import Spinner from '../components/ui/Spinner'
 import Modal from '../components/ui/Modal'
 import Input from '../components/ui/Input'
 import type { Branch, CartItem, Customer, InvoiceDetail, ProductListItem, ServiceListItem } from '../types'
-import { loadPosSettings } from '../utils/posSettings'
+import { getBranchFeatureSettings, defaultFeatureSettings } from '../api/tenantAdmin'
 import { addMinutesToDateTimeValue, formatDateTime, toApiLocalDateTime, toDubaiDateTimeValue } from '../utils/date'
 import { readPosDraftTabs, removePosDraftTab, writePosDraftTabs, upsertPosDraftTab, type PosDraftTab } from '../utils/posDrafts'
 
@@ -140,6 +140,13 @@ export default function POS() {
     queryFn: () => getTenantBranches(slug),
     enabled: !!slug,
     retry: false,
+  })
+
+  const { data: featureSettings = defaultFeatureSettings } = useQuery({
+    queryKey: ['feature-settings', slug, branchId],
+    queryFn: () => getBranchFeatureSettings(slug),
+    enabled: !!slug,
+    staleTime: 5 * 60 * 1000,
   })
 
   const activeBranches = useMemo(
@@ -375,7 +382,6 @@ export default function POS() {
   const total = cart.reduce((s, c) => s + c.qty * c.unitPriceCents, 0)
   const paidCents = toCents(payAmount)
   const changeCents = Math.max(0, paidCents - total)
-  const posSettings = loadPosSettings(branchId)
   const selectedItem = cart.find((item) => item.itemId === selectedItemId) ?? cart[0] ?? null
   const selectedCustomer = (customersData?.items ?? []).find((customer) => customer.id === selectedCustomerId)
 
@@ -631,7 +637,7 @@ export default function POS() {
 
   const handleCheckout = useCallback(async () => {
     if (cart.length === 0 || paidCents <= 0) return
-    if (posSettings.requirePaymentReference && (payMethod === 1 || payMethod === 2) && !payRef.trim()) {
+    if (featureSettings.posRequirePaymentReference && (payMethod === 1 || payMethod === 2) && !payRef.trim()) {
       setCheckoutError('رقم المرجع مطلوب عند الدفع بالبطاقة أو التحويل')
       return
     }
@@ -711,7 +717,7 @@ export default function POS() {
     } finally {
       setCheckoutLoading(false)
     }
-  }, [activeAppointmentDraftId, cart, slug, branchId, selectedCustomerId, payMethod, paidCents, payRef, qc, posSettings.requirePaymentReference])
+  }, [activeAppointmentDraftId, cart, slug, branchId, selectedCustomerId, payMethod, paidCents, payRef, qc, featureSettings.posRequirePaymentReference])
 
   if (!branchId && branchesLoading) {
     return <div className="flex justify-center py-20"><Spinner size="lg" className="text-blue-600" /></div>
@@ -855,7 +861,7 @@ export default function POS() {
           ) : (
             <p className="text-xs text-blue-500">لا توجد مواعيد حاضرة — سجّل حضور مباشر أو انتقل إلى المواعيد</p>
           )}
-          {posSettings.requireAppointment && !activeAppointmentDraftId && (
+          {featureSettings.posRequireAppointment && !activeAppointmentDraftId && (
             <div className="mt-2 rounded-lg bg-amber-50 border border-amber-200 px-3 py-2 text-xs text-amber-700 font-medium">
               لا يمكن إصدار فاتورة بدون موعد مفتوح — سجّل حضور مباشر أولاً
             </div>
@@ -1129,7 +1135,7 @@ export default function POS() {
                   <span className="text-xl font-bold text-gray-900">{fmt(total)} <span className="text-sm">د.إ</span></span>
                 </div>
                 <button
-                  disabled={cart.length === 0 || !session || (posSettings.requireAppointment && !activeAppointmentDraftId)}
+                  disabled={cart.length === 0 || !session || (featureSettings.posRequireAppointment && !activeAppointmentDraftId)}
                   onClick={() => { setPayAmount(toMoney(total)); setPayModal(true) }}
                   className="w-full bg-blue-600 text-white font-semibold py-3 rounded-xl hover:bg-blue-700
                     disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-2 transition-colors"

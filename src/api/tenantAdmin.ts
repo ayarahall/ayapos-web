@@ -184,3 +184,63 @@ export async function importBranchServices(branchId: string, file: File): Promis
   )
   return res.data
 }
+
+export interface FeatureSettings {
+  appointmentsRequireCustomer: boolean
+  appointmentsPreventOverlap: boolean
+  appointmentsAutoNoShow: boolean
+  appointmentsCheckInCreatesInvoice: boolean
+  appointmentsAllowNoShow: boolean
+  appointmentsAllowCancel: boolean
+  expensesRequireApproval: boolean
+  expensesDeductCash: boolean
+  expensesNotifyApprovers: boolean
+  expensesAllowAiAssist: boolean
+  posRequirePaymentReference: boolean
+  posRequireAppointment: boolean
+  posAutoPrintReceipt: boolean
+  posAllowMultipleInvoiceTabs: boolean
+}
+
+export const defaultFeatureSettings: FeatureSettings = {
+  appointmentsRequireCustomer: true,
+  appointmentsPreventOverlap: true,
+  appointmentsAutoNoShow: true,
+  appointmentsCheckInCreatesInvoice: true,
+  appointmentsAllowNoShow: true,
+  appointmentsAllowCancel: true,
+  expensesRequireApproval: true,
+  expensesDeductCash: true,
+  expensesNotifyApprovers: true,
+  expensesAllowAiAssist: false,
+  posRequirePaymentReference: false,
+  posRequireAppointment: false,
+  posAutoPrintReceipt: false,
+  posAllowMultipleInvoiceTabs: true,
+}
+
+export async function getAdminFeatureSettings(branchId: string): Promise<FeatureSettings> {
+  const res = await client.get<FeatureSettings>(`/tenant-admin/branches/${branchId}/feature-settings`)
+  return res.data
+}
+
+export async function updateAdminFeatureSettings(branchId: string, settings: FeatureSettings): Promise<FeatureSettings> {
+  const res = await client.post<FeatureSettings>(`/tenant-admin/branches/${branchId}/feature-settings`, settings)
+  return res.data
+}
+
+export async function getBranchFeatureSettings(tenantSlug: string): Promise<FeatureSettings> {
+  const res = await client.get<FeatureSettings>(`/t/${tenantSlug}/branch-settings/features`)
+  return res.data
+}
+
+export async function importBranchProducts(branchId: string, file: File): Promise<ServiceImportResult> {
+  const form = new FormData()
+  form.append('file', file)
+  const res = await client.post<ServiceImportResult>(
+    `/tenant-admin/branches/${branchId}/products/import`,
+    form,
+    { headers: { 'Content-Type': 'multipart/form-data' } }
+  )
+  return res.data
+}

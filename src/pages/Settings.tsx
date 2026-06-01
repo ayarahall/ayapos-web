@@ -1,9 +1,14 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { useQuery, useMutation } from '@tanstack/react-query'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Settings2, User, Key, Shield, CheckCircle, Printer, CreditCard } from 'lucide-react'
 import { changePassword } from '../api/auth'
-import { getTenantBranches, getPrintSettings, updatePrintSettings, type PrintSettings } from '../api/tenantAdmin'
+import {
+  getTenantBranches, getPrintSettings, updatePrintSettings,
+  getAdminFeatureSettings, updateAdminFeatureSettings,
+  defaultFeatureSettings,
+  type PrintSettings, type FeatureSettings,
+} from '../api/tenantAdmin'
 import { useAuthStore } from '../store/authStore'
 import { useT } from '../i18n/useT'
 import Card from '../components/ui/Card'
@@ -12,7 +17,6 @@ import Button from '../components/ui/Button'
 import Badge from '../components/ui/Badge'
 import Spinner from '../components/ui/Spinner'
 import { ROLE_LABELS } from '../types'
-import { loadPosSettings, savePosSettings, type PosSettings } from '../utils/posSettings'
 
 const ADMIN_ROLES = new Set(['OWNER', 'ADMIN', 'TENANT'])
 
@@ -113,39 +117,52 @@ function PosSettingsPanel() {
 }
 
 function PosSettingsForm({ activeBranchId }: { activeBranchId: string }) {
-  const [form, setForm] = useState<PosSettings>(() => loadPosSettings(activeBranchId))
-  const [saved, setSaved] = useState(false)
+  const qc = useQueryClient()
 
-  const updateForm = (next: PosSettings) => {
-    setForm(next)
-    savePosSettings(activeBranchId, next)
-    setSaved(true)
-    setTimeout(() => setSaved(false), 2500)
+  const query = useQuery({
+    queryKey: ['admin-feature-settings', activeBranchId],
+    queryFn: () => getAdminFeatureSettings(activeBranchId),
+  })
+
+  const saveMut = useMutation({
+    mutationFn: (s: FeatureSettings) => updateAdminFeatureSettings(activeBranchId, s),
+    onSuccess: (data) => {
+      qc.setQueryData(['admin-feature-settings', activeBranchId], data)
+      qc.invalidateQueries({ queryKey: ['feature-settings'] })
+    },
+  })
+
+  const settings = query.data ?? defaultFeatureSettings
+
+  const toggle = (key: keyof Pick<FeatureSettings, 'posRequirePaymentReference' | 'posRequireAppointment'>, value: boolean) => {
+    saveMut.mutate({ ...settings, [key]: value })
   }
 
   return (
     <div className="px-5 py-5 space-y-4">
-      {saved && (
+      {saveMut.isSuccess && (
         <div className="flex items-center gap-2 bg-green-50 border border-green-200 rounded-lg px-4 py-3 text-green-700">
           <CheckCircle size={16} />
           <span className="text-sm">تم حفظ إعدادات نقطة البيع</span>
         </div>
       )}
+      {query.isLoading && <p className="text-sm text-gray-400">جاري التحميل…</p>}
 
       {([
-        { key: 'requirePaymentReference' as const, label: 'طلب رقم المرجع عند الدفع بالبطاقة أو التحويل' },
-        { key: 'requireAppointment' as const, label: 'لا يُسمح بإصدار فاتورة إلا بعد حجز موعد أو تسجيل حضور' },
+        { key: 'posRequirePaymentReference' as const, label: 'طلب رقم المرجع عند الدفع بالبطاقة أو التحويل' },
+        { key: 'posRequireAppointment' as const, label: 'لا يُسمح بإصدار فاتورة إلا بعد حجز موعد أو تسجيل حضور' },
       ]).map(({ key, label }) => (
         <label key={key} className={`flex items-center justify-between gap-3 px-4 py-3 rounded-lg border cursor-pointer transition-colors
-          ${form[key] ? 'bg-blue-50 border-blue-200' : 'border-gray-200 hover:bg-gray-50'}`}>
+          ${settings[key] ? 'bg-blue-50 border-blue-200' : 'border-gray-200 hover:bg-gray-50'}`}>
           <span className="text-sm font-medium text-gray-700">{label}</span>
-          <div className={`relative w-10 h-5 rounded-full transition-colors ${form[key] ? 'bg-blue-600' : 'bg-gray-300'}`}>
-            <div className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${form[key] ? 'translate-x-5' : 'translate-x-0.5'}`} />
+          <div className={`relative w-10 h-5 rounded-full transition-colors ${settings[key] ? 'bg-blue-600' : 'bg-gray-300'}`}>
+            <div className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${settings[key] ? 'translate-x-5' : 'translate-x-0.5'}`} />
             <input
               type="checkbox"
               className="sr-only"
-              checked={form[key]}
-              onChange={e => updateForm({ ...form, [key]: e.target.checked })}
+              checked={settings[key]}
+              onChange={e => toggle(key, e.target.checked)}
+              disabled={saveMut.isPending}
             />
           </div>
         </label>

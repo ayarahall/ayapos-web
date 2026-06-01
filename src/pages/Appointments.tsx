@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
 import {
@@ -21,7 +21,7 @@ import Modal from '../components/ui/Modal'
 import Spinner from '../components/ui/Spinner'
 import { addDaysToISODate, addMinutesToDateTimeValue, formatShortDate, formatTime as formatDubaiTime, todayInDubaiISO, toApiLocalDateTime, toDubaiDateTimeValue } from '../utils/date'
 import { upsertPosDraftTab } from '../utils/posDrafts'
-import { loadFeatureSettings, subscribeFeatureSettings } from '../utils/featureSettings'
+import { getBranchFeatureSettings, defaultFeatureSettings } from '../api/tenantAdmin'
 
 /* helpers */
 
@@ -137,12 +137,12 @@ export default function Appointments() {
   const [newStatus, setNewStatus] = useState('')
   const [customerMode, setCustomerMode] = useState<'existing' | 'new'>('existing')
   const [newCustomerForm, setNewCustomerForm] = useState({ fullName: '', phone: '' })
-  const [featureSettings, setFeatureSettings] = useState(() => loadFeatureSettings(branchId))
-
-  useEffect(() => {
-    setFeatureSettings(loadFeatureSettings(branchId))
-    return subscribeFeatureSettings(branchId, setFeatureSettings)
-  }, [branchId])
+  const { data: featureSettings = defaultFeatureSettings } = useQuery({
+    queryKey: ['feature-settings', slug, branchId],
+    queryFn: () => getBranchFeatureSettings(slug ?? ''),
+    enabled: !!slug,
+    staleTime: 5 * 60 * 1000,
+  })
 
   /* queries */
   const { data: listData, isLoading: listLoading } = useQuery({

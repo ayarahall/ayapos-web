@@ -6,8 +6,10 @@ import {
   getBranchUsers, createBranchUser, setBranchUserPassword,
   updateBranchUserPermissions, updateBranchUserLicense,
   getPrintSettings, updatePrintSettings, updateBranch,
-  importBranchServices,
+  importBranchServices, importBranchProducts,
+  getAdminFeatureSettings, updateAdminFeatureSettings,
   type TenantBranch, type BranchUser, type PrintSettings, type ServiceImportResult, type TenantSummary,
+  type FeatureSettings, defaultFeatureSettings,
 } from '../api/tenantAdmin'
 import { getProducts, createProduct, updateProduct, deleteProduct } from '../api/products'
 import { getServices, createService, updateService, deleteService } from '../api/services'
@@ -17,8 +19,6 @@ import Modal from '../components/ui/Modal'
 import PermissionEditor from '../components/ui/PermissionEditor'
 import type { ProductListItem, ServiceListItem } from '../types'
 import { useToastStore } from '../store/toastStore'
-import { loadPosSettings, savePosSettings, type PosSettings } from '../utils/posSettings'
-import { loadFeatureSettings, saveFeatureSettings, type FeatureSettings } from '../utils/featureSettings'
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -400,13 +400,16 @@ function UsersTab({ branch, summary }: { branch: TenantBranch; summary?: TenantS
 
 // ─── Products Tab ────────────────────────────────────────────────────────────
 
-function ProductsTab({ tenantSlug }: { tenantSlug: string }) {
+function ProductsTab({ tenantSlug, branchId }: { tenantSlug: string; branchId: string }) {
   const t = useT()
+  const ta = t.tenantAdmin
   const qc = useQueryClient()
   const toast = useToastStore()
+  const fileRef = useRef<HTMLInputElement>(null)
   const [showAdd, setShowAdd] = useState(false)
   const [editItem, setEditItem] = useState<ProductListItem | null>(null)
   const [search, setSearch] = useState('')
+  const [importResult, setImportResult] = useState<ServiceImportResult | null>(null)
   const [form, setForm] = useState({ nameAr: '', nameEn: '', sku: '', barcode: '', sellPrice: '', unit: '' })
   const [editForm, setEditForm] = useState({ nameAr: '', nameEn: '', sku: '', barcode: '', sellPrice: '', unit: '' })
 
@@ -461,6 +464,14 @@ function ProductsTab({ tenantSlug }: { tenantSlug: string }) {
     },
   })
 
+  const importMut = useMutation({
+    mutationFn: (file: File) => importBranchProducts(branchId, file),
+    onSuccess: (result) => {
+      setImportResult(result)
+      qc.invalidateQueries({ queryKey: ['admin-products', tenantSlug] })
+    },
+  })
+
   function openEdit(p: ProductListItem) {
     setEditItem(p)
     setEditForm({
@@ -479,7 +490,7 @@ function ProductsTab({ tenantSlug }: { tenantSlug: string }) {
 
   return (
     <div>
-      <div className="flex items-center gap-3 mb-4">
+      <div className="flex items-center gap-2 mb-4">
         <input className="flex-1 border border-slate-200 rounded-lg px-3 py-2 text-sm"
           placeholder={t.products.searchPlaceholder} value={search}
           onChange={e => setSearch(e.target.value)} />
@@ -487,7 +498,38 @@ function ProductsTab({ tenantSlug }: { tenantSlug: string }) {
           className="flex items-center gap-1.5 bg-blue-600 text-white px-3 py-2 rounded-lg text-sm hover:bg-blue-700">
           <Plus size={14} /> {t.products.addProduct}
         </button>
+        <button onClick={() => fileRef.current?.click()}
+          disabled={importMut.isPending}
+          className="flex items-center gap-1.5 border border-slate-300 text-slate-700 px-3 py-2 rounded-lg text-sm hover:bg-slate-50 disabled:opacity-50">
+          <Upload size={14} /> {ta.importProducts}
+        </button>
+        <input ref={fileRef} type="file" accept=".xlsx,.csv" className="hidden"
+          onChange={e => { if (e.target.files?.[0]) { importMut.mutate(e.target.files[0]); e.target.value = '' } }} />
       </div>
+
+      {/* Import result */}
+      {importResult && (
+        <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 mb-4">
+          <div className="flex items-center gap-2 mb-2">
+            <CheckCircle2 size={16} className="text-blue-600" />
+            <span className="font-medium text-blue-800 text-sm">{ta.importResult}</span>
+            <button onClick={() => setImportResult(null)} className="ml-auto text-xs text-blue-600 hover:underline">{t.common.close}</button>
+          </div>
+          <p className="text-sm text-blue-700">
+            {ta.created}: {importResult.createdCount} · {ta.updated}: {importResult.updatedCount} · {ta.skipped}: {importResult.skippedCount} / {importResult.totalRows}
+          </p>
+          {importResult.issues.length > 0 && (
+            <ul className="mt-2 space-y-1">
+              {importResult.issues.map(iss => (
+                <li key={iss.rowNumber} className="flex items-start gap-1 text-xs text-red-700">
+                  <AlertCircle size={12} className="mt-0.5 shrink-0" />
+                  Row {iss.rowNumber}: {iss.message}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
 
       {query.isLoading ? (
         <p className="text-slate-500 text-sm">{t.common.loading}</p>
@@ -814,30 +856,28 @@ function ToggleSetting({
 }
 
 function FeatureSettingsTab({ branch, feature }: { branch: TenantBranch; feature: 'appointments' | 'expenses' | 'pos' }) {
-  const [settings, setSettings] = useState<FeatureSettings>(() => loadFeatureSettings(branch.id))
-  const [saved, setSaved] = useState(false)
+  const qc = useQueryClient()
+  const toast = useToastStore()
 
-  useEffect(() => {
-    setSettings(loadFeatureSettings(branch.id))
-  }, [branch.id])
+  const query = useQuery({
+    queryKey: ['admin-feature-settings', branch.id],
+    queryFn: () => getAdminFeatureSettings(branch.id),
+  })
+
+  const saveMut = useMutation({
+    mutationFn: (s: FeatureSettings) => updateAdminFeatureSettings(branch.id, s),
+    onSuccess: (data) => {
+      qc.setQueryData(['admin-feature-settings', branch.id], data)
+      qc.invalidateQueries({ queryKey: ['feature-settings'] })
+      toast.success('✓ تم حفظ الإعدادات')
+    },
+    onError: () => toast.error('فشل حفظ الإعدادات'),
+  })
+
+  const settings = query.data ?? defaultFeatureSettings
 
   const update = (patch: Partial<FeatureSettings>) => {
-    const next = { ...settings, ...patch }
-    setSettings(next)
-    saveFeatureSettings(branch.id, next)
-
-    if ('posRequirePaymentReference' in patch || 'posRequireAppointment' in patch || 'posAutoPrintReceipt' in patch) {
-      const currentPos = loadPosSettings(branch.id)
-      const nextPos: PosSettings = {
-        ...currentPos,
-        requirePaymentReference: next.posRequirePaymentReference,
-        requireAppointment: next.posRequireAppointment,
-      }
-      savePosSettings(branch.id, nextPos)
-    }
-
-    setSaved(true)
-    window.setTimeout(() => setSaved(false), 1800)
+    saveMut.mutate({ ...settings, ...patch })
   }
 
   const title = feature === 'appointments' ? 'إعدادات المواعيد' : feature === 'expenses' ? 'إعدادات المصاريف' : 'إعدادات نقطة البيع'
@@ -847,14 +887,15 @@ function FeatureSettingsTab({ branch, feature }: { branch: TenantBranch; feature
       ? 'تحكم بموافقات المصاريف وطريقة خصم الكاش والتنبيهات بدون إدخال مصروف من شاشة الإدارة.'
       : 'تحكم بقواعد الدفع والفواتير والتبويبات في نقطة البيع.'
 
+  if (query.isLoading) return <p className="text-sm text-slate-400 py-6 text-center">جاري التحميل…</p>
+
   return (
     <div className="space-y-4">
       <div className="rounded-xl border border-rose-100 bg-rose-50 px-4 py-3">
         <p className="text-sm font-bold text-slate-900">{title}</p>
         <p className="mt-1 text-xs text-slate-600">{branch.name} · {description}</p>
+        {saveMut.isPending && <p className="mt-1 text-xs text-slate-400">جاري الحفظ…</p>}
       </div>
-
-      {saved && <div className="rounded-lg border border-green-200 bg-green-50 px-4 py-2 text-sm text-green-700">تم حفظ الإعدادات</div>}
 
       {feature === 'appointments' && (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
@@ -1030,7 +1071,7 @@ export default function TenantAdmin() {
 
             {subTab === 'workspace' && <WorkspaceTab branch={activeBranch} />}
             {subTab === 'users' && <UsersTab branch={activeBranch} summary={summary} />}
-            {subTab === 'products' && user && <ProductsTab tenantSlug={user.tenantSlug} />}
+            {subTab === 'products' && user && <ProductsTab tenantSlug={user.tenantSlug} branchId={activeBranch.id} />}
             {subTab === 'services' && user && <ServicesTab tenantSlug={user.tenantSlug} branchId={activeBranch.id} />}
             {subTab === 'appointmentSettings' && <FeatureSettingsTab branch={activeBranch} feature="appointments" />}
             {subTab === 'expenseSettings' && <FeatureSettingsTab branch={activeBranch} feature="expenses" />}
