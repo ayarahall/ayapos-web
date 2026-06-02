@@ -31,7 +31,7 @@ export default function Customers() {
 
   const { data, isLoading } = useQuery({
     queryKey: ['customers', slug, branchId ?? 'login-branch', page, search],
-    queryFn: () => getCustomers(slug, { page, pageSize: 15, search }),
+    queryFn: () => getCustomers(slug, { page, pageSize: 15, q: search }),
     enabled: !!slug,
   })
 

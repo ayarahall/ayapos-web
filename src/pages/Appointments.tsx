@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useState, useEffect, useRef } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
 import {
@@ -137,6 +137,10 @@ export default function Appointments() {
   const [newStatus, setNewStatus] = useState('')
   const [customerMode, setCustomerMode] = useState<'existing' | 'new'>('existing')
   const [newCustomerForm, setNewCustomerForm] = useState({ fullName: '', phone: '' })
+  const [customerSearch, setCustomerSearch] = useState('')
+  const [customerSearchDebounced, setCustomerSearchDebounced] = useState('')
+  const [selectedCustomerLabel, setSelectedCustomerLabel] = useState('')
+  const customerSearchRef = useRef<HTMLInputElement>(null)
   const { data: featureSettings = defaultFeatureSettings } = useQuery({
     queryKey: ['feature-settings', slug, branchId],
     queryFn: () => getBranchFeatureSettings(slug ?? ''),
@@ -175,10 +179,28 @@ export default function Appointments() {
     enabled: !!slug,
   })
 
-  const { data: customersPage } = useQuery({
-    queryKey: ['customers-select', slug, branchId ?? 'login-branch'],
-    queryFn: () => getCustomers(slug, { pageSize: 200 }),
-    enabled: !!slug && modalOpen,
+  // Debounce customer search — 350 ms
+  useEffect(() => {
+    const t = setTimeout(() => setCustomerSearchDebounced(customerSearch), 350)
+    return () => clearTimeout(t)
+  }, [customerSearch])
+
+  // Normalize phone: strip +971 / 971 prefix → local 0xx format so LIKE search hits
+  function normalizeSearchTerm(term: string): string {
+    const t = term.trim()
+    if (t.startsWith('+971') && t.length > 4) return '0' + t.slice(4)
+    if (/^971\d{8,}$/.test(t)) return '0' + t.slice(3)
+    return t
+  }
+
+  const { data: customersPage, isFetching: customersFetching } = useQuery({
+    queryKey: ['customers-search', slug, branchId ?? 'login-branch', customerSearchDebounced],
+    queryFn: () => getCustomers(slug, {
+      q: normalizeSearchTerm(customerSearchDebounced) || undefined,
+      pageSize: 20,
+    }),
+    enabled: !!slug && modalOpen && customerMode === 'existing' && customerSearchDebounced.length >= 2,
+    placeholderData: (prev) => prev,
   })
 
   const { data: servicesPage } = useQuery({
@@ -261,6 +283,9 @@ export default function Appointments() {
   const resetCustomerMode = () => {
     setCustomerMode('existing')
     setNewCustomerForm({ fullName: '', phone: '' })
+    setCustomerSearch('')
+    setCustomerSearchDebounced('')
+    setSelectedCustomerLabel('')
   }
 
   const openCreate = () => {
@@ -312,6 +337,7 @@ export default function Appointments() {
       notes: item.notes,
     })
     resetCustomerMode()
+    if (item.customerId && item.customerName) setSelectedCustomerLabel(item.customerName)
     setModalOpen(true)
   }
 
@@ -824,19 +850,61 @@ export default function Appointments() {
             </div>
 
             {customerMode === 'existing' ? (
-              <select
-                required
-                value={form.customerId}
-                onChange={(e) => setForm(p => ({ ...p, customerId: e.target.value }))}
-                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
-              >
-                <option value="">-- اختر العميل --</option>
-                {(customersPage?.items ?? []).filter(c => c.isActive).map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.fullName}{c.phone ? ` - ${c.phone}` : ''}
-                  </option>
-                ))}
-              </select>
+              <div className="relative">
+                {/* Show selected customer or search input */}
+                {form.customerId && selectedCustomerLabel ? (
+                  <div className="flex items-center justify-between border border-green-400 rounded-lg px-3 py-2 text-sm bg-green-50">
+                    <span className="text-gray-800">{selectedCustomerLabel}</span>
+                    <button
+                      type="button"
+                      onClick={() => { setForm(p => ({ ...p, customerId: '' })); setCustomerSearch(''); setSelectedCustomerLabel('') }}
+                      className="text-gray-400 hover:text-red-500 ms-2 text-base leading-none"
+                    >×</button>
+                  </div>
+                ) : (
+                  <>
+                    <div className="relative">
+                      <Search size={14} className="absolute start-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                      <input
+                        ref={customerSearchRef}
+                        type="text"
+                        placeholder="ابحث بالاسم أو رقم الجوال..."
+                        value={customerSearch}
+                        onChange={(e) => setCustomerSearch(e.target.value)}
+                        className="w-full border border-gray-300 rounded-lg ps-8 pe-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-rose-400 bg-white"
+                      />
+                      {customersFetching && (
+                        <div className="absolute end-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 border-2 border-rose-400 border-t-transparent rounded-full animate-spin" />
+                      )}
+                    </div>
+                    {customerSearchDebounced.length >= 2 && (
+                      <div className="absolute z-20 w-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg max-h-48 overflow-y-auto">
+                        {(customersPage?.items ?? []).length === 0 && !customersFetching ? (
+                          <p className="px-3 py-2 text-sm text-gray-400">لا توجد نتائج</p>
+                        ) : (
+                          (customersPage?.items ?? []).map((c) => (
+                            <button
+                              key={c.id}
+                              type="button"
+                              onClick={() => {
+                                setForm(p => ({ ...p, customerId: c.id }))
+                                setSelectedCustomerLabel(`${c.fullName}${c.phone ? ` — ${c.phone}` : ''}`)
+                                setCustomerSearch('')
+                              }}
+                              className="w-full text-start px-3 py-2 text-sm hover:bg-rose-50 flex flex-col"
+                            >
+                              <span className="font-medium text-gray-900">{c.fullName}</span>
+                              {c.phone && <span className="text-xs text-gray-500">{c.phone}</span>}
+                            </button>
+                          ))
+                        )}
+                      </div>
+                    )}
+                    {/* hidden required input so form validation catches missing customer */}
+                    <input type="text" required className="sr-only" value={form.customerId} readOnly tabIndex={-1} />
+                  </>
+                )}
+              </div>
             ) : (
               <div className="space-y-2 border border-blue-200 bg-blue-50 rounded-lg p-3">
                 <input

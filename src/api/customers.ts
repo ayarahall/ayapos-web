@@ -3,7 +3,7 @@ import type { PagedResult, Customer } from '../types'
 
 export async function getCustomers(
   tenantSlug: string,
-  params: { page?: number; pageSize?: number; search?: string } = {}
+  params: { page?: number; pageSize?: number; q?: string } = {}
 ): Promise<PagedResult<Customer>> {
   const res = await client.get<PagedResult<Customer>>(
     `/t/${tenantSlug}/customers`,

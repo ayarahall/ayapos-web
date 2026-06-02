@@ -236,7 +236,7 @@ export default function POS() {
 
   const { data: customersData, isLoading: customersLoading } = useQuery({
     queryKey: ['customers', slug, branchId ?? 'login-branch', 'pos', customerSearch],
-    queryFn: () => getCustomers(slug, { page: 1, pageSize: 20, search: customerSearch }),
+    queryFn: () => getCustomers(slug, { page: 1, pageSize: 20, q: customerSearch }),
     enabled: !!slug,
   })
 
