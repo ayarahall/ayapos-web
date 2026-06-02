@@ -19,6 +19,7 @@ import Modal from '../components/ui/Modal'
 import PermissionEditor from '../components/ui/PermissionEditor'
 import type { ProductListItem, ServiceListItem } from '../types'
 import { useToastStore } from '../store/toastStore'
+import EmployeesTab from './Employees'
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -930,12 +931,12 @@ function FeatureSettingsTab({ branch, feature }: { branch: TenantBranch; feature
 }
 // ─── Main Page ───────────────────────────────────────────────────────────────
 
-type SubTab = 'workspace' | 'users' | 'products' | 'services' | 'appointmentSettings' | 'expenseSettings' | 'posSettings'
+type SubTab = 'workspace' | 'users' | 'employees' | 'products' | 'services' | 'appointmentSettings' | 'expenseSettings' | 'posSettings'
 
 export default function TenantAdmin() {
   const t = useT()
   const ta = t.tenantAdmin
-  const { user } = useAuthStore()
+  const { user, setBranchId } = useAuthStore()
   const qc = useQueryClient()
   const toast = useToastStore()
   const [activeBranchId, setActiveBranchId] = useState<string | null>(null)
@@ -959,6 +960,10 @@ export default function TenantAdmin() {
     }
   }, [branchesQuery.data, activeBranchId])
 
+  useEffect(() => {
+    if (activeBranchId) setBranchId(activeBranchId)
+  }, [activeBranchId, setBranchId])
+
   const addBranchMut = useMutation({
     mutationFn: () => createTenantAdminBranch(branchForm),
     onSuccess: (branch) => {
@@ -977,6 +982,7 @@ export default function TenantAdmin() {
   const subTabs: { key: SubTab; label: string }[] = [
     { key: 'workspace', label: 'إعدادات الفرع والطباعة' },
     { key: 'users', label: 'المستخدمون والصلاحيات' },
+    { key: 'employees', label: 'الموظفون' },
     { key: 'products', label: 'إعدادات المنتجات' },
     { key: 'services', label: 'إعدادات الخدمات' },
     { key: 'appointmentSettings', label: 'إعدادات المواعيد' },
@@ -1071,6 +1077,7 @@ export default function TenantAdmin() {
 
             {subTab === 'workspace' && <WorkspaceTab branch={activeBranch} />}
             {subTab === 'users' && <UsersTab branch={activeBranch} summary={summary} />}
+            {subTab === 'employees' && <EmployeesTab branchId={activeBranch.id} />}
             {subTab === 'products' && user && <ProductsTab tenantSlug={user.tenantSlug} branchId={activeBranch.id} />}
             {subTab === 'services' && user && <ServicesTab tenantSlug={user.tenantSlug} branchId={activeBranch.id} />}
             {subTab === 'appointmentSettings' && <FeatureSettingsTab branch={activeBranch} feature="appointments" />}
