@@ -3,7 +3,7 @@ import { useAuthStore } from '../store/authStore'
 import { useToastStore } from '../store/toastStore'
 
 const client = axios.create({
-  baseURL: import.meta.env.VITE_API_BASE_URL || 'https://ayapos-api.onrender.com',
+  baseURL: import.meta.env.VITE_API_BASE_URL ?? '/api',
   headers: { 'Content-Type': 'application/json' },
 })
 
@@ -23,10 +23,14 @@ client.interceptors.response.use(
     const status = error.response?.status
     const method = String(error.config?.method ?? 'get').toLowerCase()
     const isReadOnlyNotFound = status === 404 && method === 'get'
-    if (status === 401) {
+    const url = error.config?.url ?? ''
+    const isAuthEndpoint = url.includes('/auth/login') ||
+      url.includes('/auth/platform/login') ||
+      url.includes('/auth/tenant/pin-login')
+    if (status === 401 && !isAuthEndpoint) {
       useAuthStore.getState().logout()
       window.location.href = '/login'
-    } else if (!isReadOnlyNotFound) {
+    } else if (status !== 401 && !isReadOnlyNotFound) {
       const msg: string =
         (typeof error.response?.data === 'string' ? error.response.data : undefined) ??
         error.response?.data?.message ??
