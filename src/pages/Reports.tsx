@@ -732,6 +732,22 @@ function EmployeesTab({ slug, branchId }: { slug: string; branchId: string | nul
     enabled: !!branchId && !!selectedEmpId,
   })
 
+  // Invoices — to get actual paid amount per appointment
+  const { data: invoicesForEmp } = useQuery({
+    queryKey: ['invoices-emp-report', slug],
+    queryFn: () => getInvoices(slug, { page: 1, pageSize: 500 }),
+    enabled: !!slug,
+  })
+
+  // Map: appointmentId → invoice total (actual paid)
+  const invoiceByAppt = useMemo(() => {
+    const map: Record<string, number> = {}
+    ;(invoicesForEmp?.items ?? [])
+      .filter(inv => (inv.status === 'Paid' || inv.status === 'PartiallyPaid') && inv.appointmentId)
+      .forEach(inv => { map[inv.appointmentId!] = inv.total })
+    return map
+  }, [invoicesForEmp])
+
   const apptItems = apptData?.items ?? []
   const selectedEmp = (employees ?? []).find(e => e.id === selectedEmpId)
 
@@ -741,8 +757,8 @@ function EmployeesTab({ slug, branchId }: { slug: string; branchId: string | nul
   const empStats = useMemo(() => {
     const byName: Record<string, {
       total: number; completed: number; checkedIn: number; noShow: number; cancelled: number
-      revenueAED: number   // servicePrice for all paid-statuses (checked_in + completed)
-      paidCount: number    // appointments with paid status
+      revenueAED: number   // actual invoice total (from appointmentId link)
+      paidCount: number
     }> = {}
     apptItems.forEach(a => {
       const name = a.resourceName || 'غير محدد'
@@ -755,11 +771,13 @@ function EmployeesTab({ slug, branchId }: { slug: string; branchId: string | nul
       // Count revenue for any "paid" status
       if (PAID_STATUSES.has(a.status)) {
         byName[name].paidCount++
-        byName[name].revenueAED += a.servicePrice ?? 0
+        // Use actual invoice amount if linked, else fall back to servicePrice
+        const actualPaid = invoiceByAppt[a.id]
+        byName[name].revenueAED += actualPaid ?? a.servicePrice ?? 0
       }
     })
     return byName
-  }, [apptItems])
+  }, [apptItems, invoiceByAppt])
 
   const totalRevenue = Object.values(empStats).reduce((s, e) => s + e.revenueAED, 0)
 

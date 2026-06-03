@@ -59,6 +59,7 @@ export interface InvoiceListItem {
   total: number
   createdAt: string
   customerName?: string
+  appointmentId?: string
 }
 
 export interface InvoiceLine {
