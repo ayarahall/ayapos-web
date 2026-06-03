@@ -1533,7 +1533,7 @@ function RevenueTab({ slug, branchId }: { slug: string; branchId: string | null 
   const [preset, setPreset] = useState<RangePreset>('month')
   const [customFrom, setCustomFrom] = useState(today)
   const [customTo, setCustomTo] = useState(today)
-  const [view, setView] = useState<RevenueView>('employee')
+  const [view, setView] = useState<RevenueView>('day')
 
   const { dateFrom, dateTo } = useMemo(() => {
     if (preset === 'today') return { dateFrom: today, dateTo: today }
@@ -1542,35 +1542,96 @@ function RevenueTab({ slug, branchId }: { slug: string; branchId: string | null 
     return { dateFrom: customFrom, dateTo: customTo }
   }, [preset, customFrom, customTo, today])
 
-  const { data: apptData, isLoading } = useQuery({
-    queryKey: ['revenue-appts', slug, branchId ?? 'lb', dateFrom, dateTo],
-    queryFn: () => getAppointments(slug, { page: 1, pageSize: 500, dateFrom, dateTo: addOneDay(dateTo) }),
+  // Primary source: invoices (actual POS payments)
+  const { data: invoicesData, isLoading: invLoading } = useQuery({
+    queryKey: ['revenue-invoices', slug, branchId ?? 'lb', dateFrom, dateTo],
+    queryFn: () => getInvoices(slug, { page: 1, pageSize: 500 }),
     enabled: !!slug,
   })
 
-  const completed = useMemo(() =>
-    (apptData?.items ?? []).filter(a => a.status === 'completed'),
-    [apptData])
+  // Secondary source: appointments (for employee/service breakdown)
+  const { data: apptData, isLoading: apptLoading } = useQuery({
+    queryKey: ['revenue-appts', slug, branchId ?? 'lb', dateFrom, dateTo],
+    queryFn: () => getAppointments(slug, { page: 1, pageSize: 500, dateFrom, dateTo: addOneDay(dateTo) }),
+    enabled: !!slug && (view === 'employee' || view === 'service'),
+  })
 
+  // Sessions for cash/card/transfer breakdown
+  const { data: sessionsAllData } = useQuery({
+    queryKey: ['revenue-sessions', slug, branchId ?? 'lb'],
+    queryFn: () => getSessions(slug, { page: 1, pageSize: 50 }),
+    enabled: !!slug,
+  })
+
+  const isLoading = invLoading || apptLoading
+
+  // Filter invoices by date range (client-side, Dubai timezone)
+  const paidInvoices = useMemo(() => {
+    return (invoicesData?.items ?? []).filter(inv => {
+      if (inv.status !== 'Paid' && inv.status !== 'PartiallyPaid') return false
+      const day = inv.createdAt.slice(0, 10)
+      return day >= dateFrom && day <= dateTo
+    })
+  }, [invoicesData, dateFrom, dateTo])
+
+  // Total from invoices
   const totalRevenue = useMemo(() =>
-    completed.reduce((s, a) => s + (a.servicePrice ?? 0), 0),
-    [completed])
+    paidInvoices.reduce((s, inv) => s + inv.total, 0),
+    [paidInvoices])
+
+  // Payment method totals from sessions (for day/customer views)
+  const sessionTotals = useMemo(() => {
+    const sessions = (sessionsAllData?.items ?? [])
+    return {
+      cashCents: sessions.reduce((s, sess) => s + sess.totalCashCents, 0),
+      cardCents: sessions.reduce((s, sess) => s + sess.totalCardCents, 0),
+      transferCents: sessions.reduce((s, sess) => s + sess.totalTransferCents, 0),
+    }
+  }, [sessionsAllData])
+
+  // Appointments that were paid (checked_in or completed = invoice was opened in POS)
+  const paidAppts = useMemo(() =>
+    (apptData?.items ?? []).filter(a =>
+      a.status === 'completed' || a.status === 'checked_in' || a.status === 'confirmed'
+    ),
+    [apptData])
 
   // Group by dimension
   const grouped = useMemo(() => {
     const map: Record<string, { count: number; revenue: number }> = {}
-    completed.forEach(a => {
-      let key = ''
-      if (view === 'employee') key = a.resourceName || 'غير محدد'
-      else if (view === 'service') key = a.serviceName || 'غير محدد'
-      else if (view === 'customer') key = a.customerName || 'غير محدد'
-      else if (view === 'day') key = a.startAt.slice(0, 10)
-      if (!map[key]) map[key] = { count: 0, revenue: 0 }
-      map[key].count++
-      map[key].revenue += a.servicePrice ?? 0
-    })
-    return Object.entries(map).sort((a, b) => b[1].revenue - a[1].revenue)
-  }, [completed, view])
+
+    if (view === 'employee' || view === 'service') {
+      // Use appointments for employee/service (have this info)
+      paidAppts.forEach(a => {
+        const key = view === 'employee'
+          ? (a.resourceName || 'غير محدد')
+          : (a.serviceName || 'غير محدد')
+        if (!map[key]) map[key] = { count: 0, revenue: 0 }
+        map[key].count++
+        map[key].revenue += a.servicePrice ?? 0
+      })
+    } else if (view === 'customer') {
+      // Use invoices for customer
+      paidInvoices.forEach(inv => {
+        const key = inv.customerName || 'عميل غير محدد'
+        if (!map[key]) map[key] = { count: 0, revenue: 0 }
+        map[key].count++
+        map[key].revenue += inv.total
+      })
+    } else if (view === 'day') {
+      // Use invoices for day-by-day (most accurate)
+      paidInvoices.forEach(inv => {
+        const key = inv.createdAt.slice(0, 10)
+        if (!map[key]) map[key] = { count: 0, revenue: 0 }
+        map[key].count++
+        map[key].revenue += inv.total
+      })
+    }
+
+    return Object.entries(map).sort((a, b) =>
+      view === 'day' ? a[0].localeCompare(b[0]) : b[1].revenue - a[1].revenue
+    )
+  }, [view, paidAppts, paidInvoices])
 
   const maxRevenue = Math.max(...grouped.map(([, v]) => v.revenue), 1)
 
@@ -1597,19 +1658,26 @@ function RevenueTab({ slug, branchId }: { slug: string; branchId: string | null 
       </div>
 
       {/* Summary cards */}
-      <div className="grid grid-cols-3 gap-3">
-        <StatCard icon={TrendingUp} label="إجمالي الإيرادات" value={`${totalRevenue.toFixed(2)} AED`} color="rose" />
-        <StatCard icon={CalendarCheck} label="مواعيد مكتملة" value={fmtN(completed.length)} color="green" />
-        <StatCard icon={DollarSign} label={`متوسط لكل ${VIEW_LABELS[view]}`}
-          value={grouped.length > 0 ? `${(totalRevenue / grouped.length).toFixed(2)} AED` : '—'} color="amber" />
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        <StatCard icon={TrendingUp} label="إجمالي المدفوع (فواتير)" value={`${totalRevenue.toFixed(2)} AED`} color="rose" />
+        <StatCard icon={ShoppingBag} label="فواتير مدفوعة" value={fmtN(paidInvoices.length)} color="green" />
+        <StatCard icon={DollarSign} label="نقدا (جلسات)" value={`${(sessionTotals.cashCents / 100).toFixed(2)} AED`} color="amber" />
+        <StatCard icon={CreditCard} label="بطاقة (جلسات)" value={`${(sessionTotals.cardCents / 100).toFixed(2)} AED`} color="purple" />
       </div>
+
+      {(view === 'employee' || view === 'service') && (
+        <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-2.5 text-xs text-amber-700">
+          ⚠️ الإيراد للموظف/الخدمة مبني على سعر الخدمة من المواعيد — قد يختلف عن المبلغ المدفوع الفعلي في نقطة البيع.
+          للمبلغ الدقيق استخدم تقرير <strong>العميل</strong> أو <strong>اليوم</strong>.
+        </div>
+      )}
 
       {isLoading ? (
         <div className="flex justify-center py-12"><Spinner size="lg" className="text-rose-600" /></div>
       ) : (
         <Card title={`الإيرادات حسب ${VIEW_LABELS[view]}`}>
           {grouped.length === 0 ? (
-            <p className="text-center text-gray-400 py-12 text-sm">لا توجد مواعيد مكتملة في هذه الفترة</p>
+            <p className="text-center text-gray-400 py-12 text-sm">لا توجد بيانات في هذه الفترة</p>
           ) : (
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
@@ -1665,11 +1733,13 @@ function RevenueTab({ slug, branchId }: { slug: string; branchId: string | null 
                 <tfoot>
                   <tr className="border-t-2 border-gray-200 bg-rose-50 font-bold text-sm">
                     <td className="px-4 py-2.5" colSpan={2}>الإجمالي ({grouped.length} {VIEW_LABELS[view]})</td>
-                    <td className="px-4 py-2.5 text-center text-gray-800">{completed.length}</td>
-                    <td className="px-4 py-2.5 text-center text-rose-700">{totalRevenue.toFixed(2)}</td>
+                    <td className="px-4 py-2.5 text-center text-gray-800">{grouped.reduce((s, [, v]) => s + v.count, 0)}</td>
+                    <td className="px-4 py-2.5 text-center text-rose-700">{grouped.reduce((s, [, v]) => s + v.revenue, 0).toFixed(2)}</td>
                     <td className="px-4 py-2.5 text-center text-gray-500">100%</td>
                     <td className="px-4 py-2.5 text-center text-gray-500">
-                      {completed.length > 0 ? (totalRevenue / completed.length).toFixed(2) : '—'}
+                      {grouped.reduce((s, [, v]) => s + v.count, 0) > 0
+                        ? (grouped.reduce((s, [, v]) => s + v.revenue, 0) / grouped.reduce((s, [, v]) => s + v.count, 0)).toFixed(2)
+                        : '—'}
                     </td>
                   </tr>
                 </tfoot>
