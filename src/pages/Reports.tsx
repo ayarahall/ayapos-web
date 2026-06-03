@@ -2076,6 +2076,60 @@ function ServiceDiscountTab({ slug, branchId }: { slug: string; branchId: string
               </div>
             </Card>
           </div>
+
+          {/* Bar chart: catalog vs actual per service */}
+          {services.some(s => s.act.totalPaid > 0 || s.cat.totalCatalog > 0) && (
+            <Card title="مقارنة بيانية — الكتالوج مقابل الفعلي لكل خدمة">
+              <div className="px-4 py-4">
+                <div className="flex items-center gap-4 mb-3 text-xs">
+                  <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-sm bg-gray-400 inline-block" /> الكتالوج</span>
+                  <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-sm bg-rose-500 inline-block" /> المحصّل فعلياً</span>
+                </div>
+                <div className="space-y-3">
+                  {services.filter(s => s.cat.totalCatalog > 0 || s.act.totalPaid > 0).slice(0, 12).map(({ name, cat, act, diff }) => {
+                    const maxVal = Math.max(cat.totalCatalog, act.totalPaid, 1)
+                    const catPct = (cat.totalCatalog / maxVal) * 100
+                    const actPct = (act.totalPaid / maxVal) * 100
+                    return (
+                      <div key={name}>
+                        <div className="flex items-center justify-between mb-1 text-xs">
+                          <span className="text-gray-700 font-medium truncate max-w-[160px]">{name}</span>
+                          <div className="flex items-center gap-2 flex-shrink-0">
+                            {diff !== null && (
+                              <span className={`font-bold px-1.5 py-0.5 rounded-full text-xs ${diff < -0.01 ? 'bg-red-100 text-red-700' : diff > 0.01 ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}>
+                                {diff >= 0 ? '+' : ''}{diff.toFixed(0)}
+                              </span>
+                            )}
+                            <span className="text-gray-400">{act.totalPaid > 0 ? `${act.totalPaid.toFixed(0)} AED` : '—'}</span>
+                          </div>
+                        </div>
+                        <div className="space-y-1">
+                          {/* Catalog bar */}
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs text-gray-400 w-10 text-end flex-shrink-0">{cat.totalCatalog.toFixed(0)}</span>
+                            <div className="flex-1 h-3 bg-gray-100 rounded-full overflow-hidden">
+                              <div className="h-full rounded-full bg-gray-400 transition-all"
+                                style={{ width: `${catPct}%` }} />
+                            </div>
+                          </div>
+                          {/* Actual bar */}
+                          {act.totalPaid > 0 && (
+                            <div className="flex items-center gap-2">
+                              <span className="text-xs text-rose-500 w-10 text-end flex-shrink-0">{act.totalPaid.toFixed(0)}</span>
+                              <div className="flex-1 h-3 bg-gray-100 rounded-full overflow-hidden">
+                                <div className="h-full rounded-full bg-rose-500 transition-all"
+                                  style={{ width: `${actPct}%` }} />
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+            </Card>
+          )}
         </>
       )}
     </div>
