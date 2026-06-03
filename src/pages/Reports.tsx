@@ -1186,10 +1186,66 @@ function CustomReportBuilder({ slug, branchId }: { slug: string; branchId: strin
     return String(value)
   }
 
+  // Quick report presets
+  const QUICK_REPORTS = [
+    {
+      label: '📊 إيرادات الموظفين',
+      desc: 'موظف × حالة الموعد × سعر الخدمة',
+      fields: ['appt-employee', 'appt-date', 'appt-service', 'appt-status', 'appt-price'],
+      mode: 'pivot' as ReportMode,
+      row: 'appt-employee', col: 'appt-status', val: 'appt-price',
+    },
+    {
+      label: '📋 قائمة المواعيد',
+      desc: 'عميل، موظف، خدمة، تاريخ، حالة',
+      fields: ['appt-date', 'appt-customer', 'appt-employee', 'appt-service', 'appt-status', 'appt-price'],
+      mode: 'flat' as ReportMode,
+      row: '', col: '', val: '',
+    },
+    {
+      label: '💰 قائمة الفواتير',
+      desc: 'رقم الفاتورة، العميل، المبلغ، الحالة',
+      fields: ['inv-date', 'inv-code', 'inv-customer', 'inv-total', 'inv-status'],
+      mode: 'flat' as ReportMode,
+      row: '', col: '', val: '',
+    },
+    {
+      label: '🧾 المصاريف',
+      desc: 'الفئة × الحالة × المبلغ',
+      fields: ['exp-date', 'exp-title', 'exp-category', 'exp-amount', 'exp-status'],
+      mode: 'pivot' as ReportMode,
+      row: 'exp-category', col: 'exp-status', val: 'exp-amount',
+    },
+  ]
+
+  const applyQuickReport = (qr: typeof QUICK_REPORTS[0]) => {
+    const fields = qr.fields.map(id => ALL_FIELDS.find(f => f.id === id)!).filter(Boolean)
+    setSelectedFields(fields)
+    setReportMode(qr.mode)
+    setPivotRow(qr.row)
+    setPivotCol(qr.col)
+    setPivotVal(qr.val)
+    setShowPreview(false)
+  }
+
   return (
     <div className="space-y-5">
       <RangePicker preset={preset} customFrom={customFrom} customTo={customTo} today={today}
         onPreset={setPreset} onFrom={setCustomFrom} onTo={setCustomTo} />
+
+      {/* Quick report buttons */}
+      <div className="bg-white rounded-xl border border-gray-100 p-4">
+        <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-3">تقارير جاهزة — اضغط لتطبيق مباشرة</p>
+        <div className="flex flex-wrap gap-2">
+          {QUICK_REPORTS.map(qr => (
+            <button key={qr.label} onClick={() => applyQuickReport(qr)}
+              className="flex flex-col items-start px-3 py-2 border border-gray-200 rounded-lg hover:border-rose-300 hover:bg-rose-50 transition-colors text-start">
+              <span className="text-sm font-semibold text-gray-800">{qr.label}</span>
+              <span className="text-xs text-gray-400 mt-0.5">{qr.desc}</span>
+            </button>
+          ))}
+        </div>
+      </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
         {/* Available fields */}
