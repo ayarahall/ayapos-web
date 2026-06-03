@@ -1815,14 +1815,14 @@ function RevenueTab({ slug, branchId }: { slug: string; branchId: string | null 
   )
 }
 
-// ─── Services discount/actual tab ────────────────────────────────────────────
+// ─── Services: catalog vs actual (split layout) ───────────────────────────────
 
 function ServiceDiscountTab({ slug, branchId }: { slug: string; branchId: string | null }) {
   const today = todayInDubaiISO()
   const [preset, setPreset] = useState<RangePreset>('month')
   const [customFrom, setCustomFrom] = useState(today)
   const [customTo, setCustomTo] = useState(today)
-  const [loadDetails, setLoadDetails] = useState(false)
+  const [loaded, setLoaded] = useState(false)
 
   const { dateFrom, dateTo } = useMemo(() => {
     if (preset === 'today') return { dateFrom: today, dateTo: today }
@@ -1831,35 +1831,28 @@ function ServiceDiscountTab({ slug, branchId }: { slug: string; branchId: string
     return { dateFrom: customFrom, dateTo: customTo }
   }, [preset, customFrom, customTo, today])
 
-  // Appointments — for catalog price per service
-  const { data: apptData, isLoading: apptLoading } = useQuery({
-    queryKey: ['svc-appts', slug, branchId ?? 'lb', dateFrom, dateTo],
-    queryFn: () => getAppointments(slug, { page: 1, pageSize: 500, dateFrom, dateTo: addOneDay(dateTo) }),
-    enabled: !!slug,
-  })
-
-  // Invoices list — to identify which invoices to detail
+  // Invoices list
   const { data: invoicesData, isLoading: invLoading } = useQuery({
     queryKey: ['svc-invoices', slug],
     queryFn: () => getInvoices(slug, { page: 1, pageSize: 200 }),
-    enabled: !!slug && loadDetails,
+    enabled: !!slug && loaded,
   })
 
-  // Filter invoices in range
+  // Filter paid invoices in range
   const paidInvoicesInRange = useMemo(() =>
     (invoicesData?.items ?? []).filter(inv => {
       const d = inv.createdAt.slice(0, 10)
       return (inv.status === 'Paid' || inv.status === 'PartiallyPaid') && d >= dateFrom && d <= dateTo
-    }).slice(0, 30), // limit to 30 invoices
+    }).slice(0, 40),
     [invoicesData, dateFrom, dateTo])
 
-  // Fetch details for each invoice (parallel, max 30)
+  // Fetch invoice details in parallel
   const invoiceDetailsQueries = paidInvoicesInRange.map(inv =>
     // eslint-disable-next-line react-hooks/rules-of-hooks
     useQuery({
       queryKey: ['invoice-detail', slug, inv.id],
       queryFn: () => getInvoice(slug, inv.id),
-      enabled: loadDetails && paidInvoicesInRange.length > 0,
+      enabled: loaded && paidInvoicesInRange.length > 0,
       staleTime: 10 * 60 * 1000,
     })
   )
@@ -1867,187 +1860,222 @@ function ServiceDiscountTab({ slug, branchId }: { slug: string; branchId: string
   const detailsLoading = invoiceDetailsQueries.some(q => q.isLoading)
   const allDetails = invoiceDetailsQueries.map(q => q.data).filter(Boolean)
 
-  // Aggregate actual price per service from invoice lines
+  // Actual prices from invoice lines — group by service name
   const actualByService = useMemo(() => {
-    const map: Record<string, { qty: number; totalPaid: number }> = {}
+    const map: Record<string, { qty: number; totalPaid: number; unitPrices: number[] }> = {}
     allDetails.forEach(detail => {
       if (!detail) return
       const lines = detail.lines ?? detail.items ?? []
       lines.filter(l => l.itemType === 'Service').forEach(line => {
         const name = line.nameSnapshot ?? line.name ?? 'غير محدد'
-        if (!map[name]) map[name] = { qty: 0, totalPaid: 0 }
-        map[name].qty += line.qty ?? 1
-        const paid = line.lineTotal ?? (line.lineTotalCents ? line.lineTotalCents / 100 : 0)
-        map[name].totalPaid += paid
+        if (!map[name]) map[name] = { qty: 0, totalPaid: 0, unitPrices: [] }
+        const qty = line.qty ?? 1
+        const lineTotal = line.lineTotal ?? (line.lineTotalCents ? line.lineTotalCents / 100 : 0)
+        const unitPrice = line.unitPrice ?? (line.unitPriceCents ? line.unitPriceCents / 100 : lineTotal / qty)
+        map[name].qty += qty
+        map[name].totalPaid += lineTotal
+        map[name].unitPrices.push(unitPrice)
       })
     })
     return map
   }, [allDetails])
 
-  // Catalog price per service from appointments
+  // Catalog prices from appointments
+  const { data: apptData, isLoading: apptLoading } = useQuery({
+    queryKey: ['svc-appts', slug, branchId ?? 'lb', dateFrom, dateTo],
+    queryFn: () => getAppointments(slug, { page: 1, pageSize: 500, dateFrom, dateTo: addOneDay(dateTo) }),
+    enabled: !!slug && loaded,
+  })
+
   const catalogByService = useMemo(() => {
     const map: Record<string, { count: number; totalCatalog: number; unitPrice: number }> = {}
-    const appts = (apptData?.items ?? []).filter(a =>
-      a.status === 'completed' || a.status === 'checked_in' || a.status === 'confirmed'
-    )
-    appts.forEach(a => {
-      const name = a.serviceName || 'غير محدد'
-      if (!map[name]) map[name] = { count: 0, totalCatalog: 0, unitPrice: a.servicePrice ?? 0 }
-      map[name].count++
-      map[name].totalCatalog += a.servicePrice ?? 0
-      map[name].unitPrice = a.servicePrice ?? map[name].unitPrice
-    })
+    ;(apptData?.items ?? [])
+      .filter(a => ['completed', 'checked_in', 'confirmed', 'attended'].includes(a.status))
+      .forEach(a => {
+        const name = a.serviceName || 'غير محدد'
+        if (!map[name]) map[name] = { count: 0, totalCatalog: 0, unitPrice: a.servicePrice ?? 0 }
+        map[name].count++
+        map[name].totalCatalog += a.servicePrice ?? 0
+        if (a.servicePrice) map[name].unitPrice = a.servicePrice
+      })
     return map
   }, [apptData])
 
-  // Merge: services from appointments + actual from invoices
+  // Merge both sides
   const services = useMemo(() => {
     const names = new Set([...Object.keys(catalogByService), ...Object.keys(actualByService)])
     return [...names].map(name => {
       const cat = catalogByService[name] ?? { count: 0, totalCatalog: 0, unitPrice: 0 }
-      const act = actualByService[name] ?? { qty: 0, totalPaid: 0 }
-      const actualPerUnit = act.qty > 0 ? act.totalPaid / act.qty : null
-      const diff = actualPerUnit !== null ? actualPerUnit - cat.unitPrice : null
-      return { name, cat, act, actualPerUnit, diff }
-    }).sort((a, b) => b.cat.totalCatalog - a.cat.totalCatalog)
+      const act = actualByService[name] ?? { qty: 0, totalPaid: 0, unitPrices: [] }
+      const avgActualUnit = act.unitPrices.length > 0
+        ? act.unitPrices.reduce((s, p) => s + p, 0) / act.unitPrices.length
+        : null
+      const diff = avgActualUnit !== null && cat.unitPrice > 0 ? avgActualUnit - cat.unitPrice : null
+      return { name, cat, act, avgActualUnit, diff }
+    }).sort((a, b) => (b.act.totalPaid || b.cat.totalCatalog) - (a.act.totalPaid || a.cat.totalCatalog))
   }, [catalogByService, actualByService])
 
   const totalCatalog = services.reduce((s, svc) => s + svc.cat.totalCatalog, 0)
   const totalActual = services.reduce((s, svc) => s + svc.act.totalPaid, 0)
   const totalDiff = totalActual - totalCatalog
 
-  const isLoading = apptLoading || (loadDetails && invLoading) || (loadDetails && detailsLoading)
+  const isLoading = invLoading || apptLoading || (loaded && detailsLoading)
 
   return (
     <div className="space-y-5">
-      <RangePicker preset={preset} customFrom={customFrom} customTo={customTo} today={today}
-        onPreset={setPreset} onFrom={setCustomFrom} onTo={setCustomTo} />
-
-      {/* Explanation */}
-      <div className="bg-blue-50 border border-blue-200 rounded-xl px-4 py-3 text-xs text-blue-700 space-y-1">
-        <p className="font-semibold">كيف يعمل هذا التقرير:</p>
-        <p>• <strong>سعر الكتالوج</strong>: سعر الخدمة من المواعيد (ما تم تسعيره عند الحجز)</p>
-        <p>• <strong>السعر المحصّل</strong>: المبلغ الفعلي المدفوع من بنود الفاتورة في نقطة البيع</p>
-        <p>• <strong>الفرق</strong>: سالب = خصم أُعطي للعميل، موجب = سعر أعلى من الكتالوج</p>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <RangePicker preset={preset} customFrom={customFrom} customTo={customTo} today={today}
+          onPreset={setPreset} onFrom={setCustomFrom} onTo={setCustomTo} />
+        {!loaded && (
+          <button onClick={() => setLoaded(true)}
+            className="bg-rose-600 text-white px-5 py-2 rounded-lg text-sm font-medium hover:bg-rose-700 transition-colors">
+            تحميل البيانات
+          </button>
+        )}
       </div>
 
-      {/* Load details button */}
-      {!loadDetails && (
-        <div className="bg-white rounded-xl border border-gray-200 p-6 text-center">
-          <p className="text-sm text-gray-600 mb-3">لجلب السعر الفعلي من نقطة البيع، اضغط زر التحميل</p>
-          <button onClick={() => setLoadDetails(true)}
-            className="bg-rose-600 text-white px-6 py-2 rounded-lg text-sm font-medium hover:bg-rose-700 transition-colors">
-            تحميل بيانات الفواتير (آخر 30 فاتورة)
-          </button>
+      {!loaded && (
+        <div className="bg-gray-50 border border-gray-200 rounded-xl p-10 text-center text-gray-400">
+          <Wrench size={36} className="mx-auto mb-2 text-gray-200" />
+          <p className="text-sm">اضغط <strong className="text-rose-600">تحميل البيانات</strong> لتحليل الفواتير</p>
         </div>
       )}
 
       {isLoading && (
-        <div className="flex flex-col items-center justify-center py-12 gap-3">
+        <div className="flex flex-col items-center py-12 gap-3">
           <Spinner size="lg" className="text-rose-600" />
-          <p className="text-sm text-gray-500">
-            {detailsLoading ? `جاري تحميل ${paidInvoicesInRange.length} فاتورة...` : 'جاري التحميل...'}
-          </p>
+          <p className="text-sm text-gray-500">{detailsLoading ? `تحليل ${paidInvoicesInRange.length} فاتورة...` : 'جاري التحميل...'}</p>
         </div>
       )}
 
-      {!isLoading && (loadDetails || Object.keys(catalogByService).length > 0) && (
+      {loaded && !isLoading && (
         <>
-          {/* Summary */}
+          {/* 3 summary cards */}
           <div className="grid grid-cols-3 gap-3">
-            <div className="bg-white rounded-xl border border-gray-200 p-4">
-              <p className="text-xs text-gray-500">إجمالي سعر الكتالوج</p>
-              <p className="text-xl font-bold text-gray-800 mt-1">{totalCatalog.toFixed(2)} AED</p>
+            <div className="bg-white rounded-xl border-2 border-gray-200 p-4">
+              <p className="text-xs text-gray-400 mb-1">سعر الكتالوج (من المواعيد)</p>
+              <p className="text-2xl font-bold text-gray-800">{totalCatalog.toFixed(2)}<span className="text-sm text-gray-400 ms-1">AED</span></p>
             </div>
-            <div className="bg-white rounded-xl border border-gray-200 p-4">
-              <p className="text-xs text-gray-500">إجمالي المحصّل فعلياً</p>
-              <p className="text-xl font-bold text-rose-700 mt-1">
-                {loadDetails ? totalActual.toFixed(2) : '—'} AED
+            <div className="bg-white rounded-xl border-2 border-rose-200 p-4">
+              <p className="text-xs text-gray-400 mb-1">السعر الفعلي (من الفواتير)</p>
+              <p className="text-2xl font-bold text-rose-700">{totalActual.toFixed(2)}<span className="text-sm text-rose-300 ms-1">AED</span></p>
+              <p className="text-xs text-gray-400 mt-1">{paidInvoicesInRange.length} فاتورة محللة</p>
+            </div>
+            <div className={`rounded-xl border-2 p-4 ${totalDiff < -0.01 ? 'bg-red-50 border-red-300' : totalDiff > 0.01 ? 'bg-green-50 border-green-300' : 'bg-gray-50 border-gray-200'}`}>
+              <p className="text-xs text-gray-400 mb-1">الفرق الإجمالي</p>
+              <p className={`text-2xl font-bold ${totalDiff < -0.01 ? 'text-red-700' : totalDiff > 0.01 ? 'text-green-700' : 'text-gray-500'}`}>
+                {totalDiff >= 0 ? '+' : ''}{totalDiff.toFixed(2)}<span className="text-sm ms-1">AED</span>
               </p>
-            </div>
-            <div className={`rounded-xl border p-4 ${totalDiff < 0 ? 'bg-red-50 border-red-200' : totalDiff > 0 ? 'bg-green-50 border-green-200' : 'bg-gray-50 border-gray-200'}`}>
-              <p className="text-xs text-gray-500">إجمالي الفرق (خصومات)</p>
-              <p className={`text-xl font-bold mt-1 ${totalDiff < 0 ? 'text-red-700' : totalDiff > 0 ? 'text-green-700' : 'text-gray-600'}`}>
-                {loadDetails ? `${totalDiff >= 0 ? '+' : ''}${totalDiff.toFixed(2)}` : '—'} AED
+              <p className="text-xs mt-1">
+                {totalDiff < -0.01 ? '🔴 خصومات أُعطيت للعملاء' : totalDiff > 0.01 ? '🟢 تم تحصيل أكثر من الكتالوج' : '✅ لا يوجد فرق'}
               </p>
             </div>
           </div>
 
-          {/* Services table */}
-          <Card title={`تحليل الخدمات — سعر الكتالوج مقابل المحصّل (${services.length} خدمة)`}>
-            {loadDetails && paidInvoicesInRange.length > 0 && (
-              <div className="px-4 py-2 bg-blue-50 border-b border-blue-100 text-xs text-blue-600">
-                تم تحليل {paidInvoicesInRange.length} فاتورة — السعر الفعلي مشتق من بنود الفواتير
+          {/* Split table: left = catalog, right = actual */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+
+            {/* LEFT: Catalog */}
+            <Card title="سعر الكتالوج — من المواعيد">
+              <div className="px-3 py-2 bg-gray-50 border-b border-gray-100 text-xs text-gray-500">
+                الأسعار حسب بيانات الحجز في نظام المواعيد
               </div>
-            )}
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-gray-100 text-right bg-gray-50">
-                    <th className="px-4 py-2.5 text-xs font-semibold text-gray-500">الخدمة</th>
-                    <th className="px-4 py-2.5 text-xs font-semibold text-gray-500 text-center">مرات</th>
-                    <th className="px-4 py-2.5 text-xs font-semibold text-gray-600 text-center">سعر الكتالوج</th>
-                    <th className="px-4 py-2.5 text-xs font-semibold text-gray-600 text-center">إجمالي الكتالوج</th>
-                    {loadDetails && <>
-                      <th className="px-4 py-2.5 text-xs font-semibold text-rose-600 text-center">السعر المحصّل</th>
-                      <th className="px-4 py-2.5 text-xs font-semibold text-rose-600 text-center">إجمالي المحصّل</th>
-                      <th className="px-4 py-2.5 text-xs font-semibold text-amber-600 text-center">الفرق/وحدة</th>
-                    </>}
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-50">
-                  {services.map(({ name, cat, act, actualPerUnit, diff }) => (
-                    <tr key={name} className="hover:bg-gray-50">
-                      <td className="px-4 py-2.5">
-                        <div className="flex items-center gap-2">
-                          <div className="w-6 h-6 rounded-full bg-rose-100 flex items-center justify-center text-rose-700 text-xs font-bold flex-shrink-0">{name[0]}</div>
-                          <span className="font-medium text-gray-900 text-sm">{name}</span>
-                        </div>
-                      </td>
-                      <td className="px-4 py-2.5 text-center text-gray-700 font-semibold">{cat.count || act.qty}</td>
-                      <td className="px-4 py-2.5 text-center text-gray-600">{cat.unitPrice.toFixed(2)}</td>
-                      <td className="px-4 py-2.5 text-center text-gray-700 font-semibold">{cat.totalCatalog.toFixed(2)}</td>
-                      {loadDetails && <>
-                        <td className="px-4 py-2.5 text-center">
-                          {actualPerUnit !== null
-                            ? <span className="font-semibold text-rose-700">{actualPerUnit.toFixed(2)}</span>
-                            : <span className="text-gray-300 text-xs">لم يُحلَّل</span>}
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-gray-100 text-right">
+                      <th className="px-3 py-2 text-xs font-semibold text-gray-500">الخدمة</th>
+                      <th className="px-3 py-2 text-xs font-semibold text-gray-500 text-center">مرات</th>
+                      <th className="px-3 py-2 text-xs font-semibold text-gray-600 text-center">سعر الوحدة</th>
+                      <th className="px-3 py-2 text-xs font-semibold text-gray-600 text-center">الإجمالي</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-50">
+                    {services.map(({ name, cat }) => (
+                      <tr key={name} className="hover:bg-gray-50">
+                        <td className="px-3 py-2">
+                          <div className="flex items-center gap-1.5">
+                            <div className="w-5 h-5 rounded-full bg-gray-100 flex items-center justify-center text-gray-600 text-xs font-bold flex-shrink-0">{name[0]}</div>
+                            <span className="text-gray-800 text-xs font-medium">{name}</span>
+                          </div>
                         </td>
-                        <td className="px-4 py-2.5 text-center">
+                        <td className="px-3 py-2 text-center text-gray-500 text-xs">{cat.count || '—'}</td>
+                        <td className="px-3 py-2 text-center text-gray-700 font-semibold text-xs">{cat.unitPrice > 0 ? cat.unitPrice.toFixed(2) : <span className="text-amber-500">0</span>}</td>
+                        <td className="px-3 py-2 text-center font-bold text-gray-800 text-xs">{cat.totalCatalog.toFixed(2)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                  <tfoot>
+                    <tr className="border-t-2 border-gray-200 bg-gray-50 font-bold">
+                      <td className="px-3 py-2 text-xs text-gray-600" colSpan={3}>الإجمالي</td>
+                      <td className="px-3 py-2 text-center text-gray-800 text-sm">{totalCatalog.toFixed(2)}</td>
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+            </Card>
+
+            {/* RIGHT: Actual from invoices */}
+            <Card title="السعر الفعلي — من فواتير نقطة البيع">
+              <div className="px-3 py-2 bg-rose-50 border-b border-rose-100 text-xs text-rose-600">
+                الأسعار المحصّلة فعلياً من بنود الفواتير المدفوعة
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-gray-100 text-right">
+                      <th className="px-3 py-2 text-xs font-semibold text-gray-500">الخدمة</th>
+                      <th className="px-3 py-2 text-xs font-semibold text-gray-500 text-center">مرات</th>
+                      <th className="px-3 py-2 text-xs font-semibold text-rose-600 text-center">متوسط السعر</th>
+                      <th className="px-3 py-2 text-xs font-semibold text-rose-600 text-center">الإجمالي</th>
+                      <th className="px-3 py-2 text-xs font-semibold text-amber-600 text-center">الفرق</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-50">
+                    {services.map(({ name, cat, act, avgActualUnit, diff }) => (
+                      <tr key={name} className="hover:bg-rose-50/30">
+                        <td className="px-3 py-2">
+                          <div className="flex items-center gap-1.5">
+                            <div className="w-5 h-5 rounded-full bg-rose-100 flex items-center justify-center text-rose-700 text-xs font-bold flex-shrink-0">{name[0]}</div>
+                            <span className="text-gray-800 text-xs font-medium">{name}</span>
+                          </div>
+                        </td>
+                        <td className="px-3 py-2 text-center text-gray-500 text-xs">{act.qty || '—'}</td>
+                        <td className="px-3 py-2 text-center text-xs">
+                          {avgActualUnit !== null
+                            ? <span className="font-semibold text-rose-700">{avgActualUnit.toFixed(2)}</span>
+                            : <span className="text-gray-300">—</span>}
+                        </td>
+                        <td className="px-3 py-2 text-center text-xs">
                           {act.totalPaid > 0
-                            ? <span className="font-semibold text-rose-700">{act.totalPaid.toFixed(2)}</span>
-                            : <span className="text-gray-300 text-xs">—</span>}
+                            ? <span className="font-bold text-rose-700">{act.totalPaid.toFixed(2)}</span>
+                            : <span className="text-gray-300">—</span>}
                         </td>
-                        <td className="px-4 py-2.5 text-center">
-                          {diff !== null && cat.unitPrice > 0 ? (
-                            <span className={`font-bold text-sm px-2 py-0.5 rounded-full ${diff < -0.01 ? 'bg-red-100 text-red-700' : diff > 0.01 ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}>
+                        <td className="px-3 py-2 text-center">
+                          {diff !== null ? (
+                            <span className={`font-bold text-xs px-1.5 py-0.5 rounded-full ${diff < -0.01 ? 'bg-red-100 text-red-700' : diff > 0.01 ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}>
                               {diff >= 0 ? '+' : ''}{diff.toFixed(2)}
                             </span>
-                          ) : <span className="text-gray-300 text-xs">—</span>}
+                          ) : <span className="text-gray-200 text-xs">—</span>}
                         </td>
-                      </>}
-                    </tr>
-                  ))}
-                </tbody>
-                <tfoot>
-                  <tr className="border-t-2 border-gray-200 bg-rose-50 font-bold">
-                    <td className="px-4 py-2.5 text-sm text-gray-700" colSpan={2}>الإجمالي</td>
-                    <td className="px-4 py-2.5 text-center text-gray-500 text-xs">—</td>
-                    <td className="px-4 py-2.5 text-center text-gray-800">{totalCatalog.toFixed(2)}</td>
-                    {loadDetails && <>
-                      <td className="px-4 py-2.5 text-center text-gray-500 text-xs">—</td>
-                      <td className="px-4 py-2.5 text-center text-rose-700">{totalActual.toFixed(2)}</td>
-                      <td className="px-4 py-2.5 text-center">
-                        <span className={`font-bold ${totalDiff < 0 ? 'text-red-700' : 'text-green-700'}`}>
+                      </tr>
+                    ))}
+                  </tbody>
+                  <tfoot>
+                    <tr className="border-t-2 border-gray-200 bg-rose-50 font-bold">
+                      <td className="px-3 py-2 text-xs text-gray-600" colSpan={3}>الإجمالي</td>
+                      <td className="px-3 py-2 text-center text-rose-700 text-sm">{totalActual.toFixed(2)}</td>
+                      <td className="px-3 py-2 text-center">
+                        <span className={`text-sm font-bold ${totalDiff < -0.01 ? 'text-red-700' : totalDiff > 0.01 ? 'text-green-700' : 'text-gray-500'}`}>
                           {totalDiff >= 0 ? '+' : ''}{totalDiff.toFixed(2)}
                         </span>
                       </td>
-                    </>}
-                  </tr>
-                </tfoot>
-              </table>
-            </div>
-          </Card>
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+            </Card>
+          </div>
         </>
       )}
     </div>
