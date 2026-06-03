@@ -54,57 +54,57 @@ function dateRange(from: string, to: string): string[] {
   return dates
 }
 
-// ─── Mini SVG bar chart ───────────────────────────────────────────────────────
+// ─── Mini bar chart (CSS flex — no SVG scaling issues) ───────────────────────
 
 interface SalesBar { label: string; cents: number }
 
 function SalesBarChart({ bars }: { bars: SalesBar[] }) {
-  const [tooltip, setTooltip] = useState<{ bar: SalesBar; x: number; y: number } | null>(null)
+  const [hoveredIdx, setHoveredIdx] = useState<number | null>(null)
   const maxCents = Math.max(...bars.map(b => b.cents), 1)
-  const chartH = 100
-  const barW = Math.max(24, Math.min(40, Math.floor(540 / (bars.length || 1)) - 12))
-  const gap = Math.max(6, barW * 0.3)
-  const paddingX = 8
-  const svgW = bars.length * (barW + gap) + paddingX * 2 - gap
+  const CHART_H = 90
+  const LABEL_H = 20
 
   return (
-    <div className="relative w-full overflow-x-auto">
-      <svg width="100%" viewBox={`0 0 ${svgW} ${chartH + 36}`} className="overflow-visible min-w-[260px]">
-        {/* horizontal grid lines */}
-        {[0.25, 0.5, 0.75, 1].map(r => (
-          <line key={r}
-            x1={0} y1={chartH * (1 - r)}
-            x2={svgW} y2={chartH * (1 - r)}
-            stroke="#f3f4f6" strokeWidth={1} />
+    <div style={{ height: CHART_H + LABEL_H }} className="relative w-full">
+      {/* Grid lines */}
+      <div className="absolute inset-0 flex flex-col justify-between pointer-events-none" style={{ bottom: LABEL_H }}>
+        {[1, 0.75, 0.5, 0.25, 0].map(r => (
+          <div key={r} className={`border-t w-full ${r === 0 ? 'border-gray-200' : 'border-gray-100'}`} />
         ))}
+      </div>
+
+      {/* Bars */}
+      <div className="absolute inset-0 flex items-end gap-0.5" style={{ paddingBottom: LABEL_H }}>
         {bars.map((bar, i) => {
-          const barH = Math.max(bar.cents > 0 ? 4 : 0, (bar.cents / maxCents) * chartH)
-          const x = paddingX + i * (barW + gap)
-          const y = chartH - barH
+          const pct = (bar.cents / maxCents) * 100
+          const isHovered = hoveredIdx === i
           return (
-            <g key={bar.label}>
-              <rect x={x} y={y} width={barW} height={barH} rx={4}
-                fill="#e40046" opacity={0.8}
-                className="cursor-pointer transition-opacity hover:opacity-100"
-                onMouseEnter={e => {
-                  const rect = (e.target as SVGRectElement).getBoundingClientRect()
-                  setTooltip({ bar, x: rect.left + rect.width / 2, y: rect.top })
-                }}
-                onMouseLeave={() => setTooltip(null)}
-              />
-              <text x={x + barW / 2} y={chartH + 14} textAnchor="middle" fontSize={9} fill="#6b7280">
+            <div key={i} className="flex-1 flex flex-col items-center justify-end relative h-full"
+              onMouseEnter={() => setHoveredIdx(i)}
+              onMouseLeave={() => setHoveredIdx(null)}>
+              {/* Tooltip */}
+              {isHovered && bar.cents > 0 && (
+                <div className="absolute bottom-full mb-1 z-10 bg-gray-900 text-white rounded px-1.5 py-0.5 whitespace-nowrap pointer-events-none"
+                  style={{ fontSize: 10 }}>
+                  {bar.label}: {fmt(bar.cents)}
+                </div>
+              )}
+              {/* Bar */}
+              <div className="w-full rounded-t-md transition-all duration-150"
+                style={{
+                  height: bar.cents > 0 ? `${Math.max(3, pct)}%` : '2px',
+                  backgroundColor: bar.cents > 0 ? (isHovered ? '#be0038' : '#e40046') : '#e5e7eb',
+                  opacity: bar.cents > 0 ? (isHovered ? 1 : 0.82) : 1,
+                }} />
+              {/* Label */}
+              <div className="absolute w-full text-center truncate px-0.5"
+                style={{ bottom: -LABEL_H, fontSize: 8, color: '#9ca3af', lineHeight: `${LABEL_H}px` }}>
                 {bar.label}
-              </text>
-            </g>
+              </div>
+            </div>
           )
         })}
-      </svg>
-      {tooltip && (
-        <div className="fixed z-50 pointer-events-none bg-gray-900 text-white text-xs rounded-lg px-2.5 py-1.5 shadow-lg"
-          style={{ left: tooltip.x, top: tooltip.y - 40, transform: 'translateX(-50%)' }}>
-          {tooltip.bar.label}: {fmt(tooltip.bar.cents)}
-        </div>
-      )}
+      </div>
     </div>
   )
 }
