@@ -1822,8 +1822,6 @@ function ServiceDiscountTab({ slug, branchId }: { slug: string; branchId: string
   const [preset, setPreset] = useState<RangePreset>('month')
   const [customFrom, setCustomFrom] = useState(today)
   const [customTo, setCustomTo] = useState(today)
-  const [loaded, setLoaded] = useState(false)
-
   const { dateFrom, dateTo } = useMemo(() => {
     if (preset === 'today') return { dateFrom: today, dateTo: today }
     if (preset === 'week') return { dateFrom: startOfWeek(today), dateTo: today }
@@ -1835,7 +1833,7 @@ function ServiceDiscountTab({ slug, branchId }: { slug: string; branchId: string
   const { data: invoicesData, isLoading: invLoading } = useQuery({
     queryKey: ['svc-invoices', slug],
     queryFn: () => getInvoices(slug, { page: 1, pageSize: 200 }),
-    enabled: !!slug && loaded,
+    enabled: !!slug,
   })
 
   // Filter paid invoices in range
@@ -1852,7 +1850,7 @@ function ServiceDiscountTab({ slug, branchId }: { slug: string; branchId: string
     useQuery({
       queryKey: ['invoice-detail', slug, inv.id],
       queryFn: () => getInvoice(slug, inv.id),
-      enabled: loaded && paidInvoicesInRange.length > 0,
+      enabled: paidInvoicesInRange.length > 0,
       staleTime: 10 * 60 * 1000,
     })
   )
@@ -1884,7 +1882,7 @@ function ServiceDiscountTab({ slug, branchId }: { slug: string; branchId: string
   const { data: apptData, isLoading: apptLoading } = useQuery({
     queryKey: ['svc-appts', slug, branchId ?? 'lb', dateFrom, dateTo],
     queryFn: () => getAppointments(slug, { page: 1, pageSize: 500, dateFrom, dateTo: addOneDay(dateTo) }),
-    enabled: !!slug && loaded,
+    enabled: !!slug,
   })
 
   const catalogByService = useMemo(() => {
@@ -1919,27 +1917,12 @@ function ServiceDiscountTab({ slug, branchId }: { slug: string; branchId: string
   const totalActual = services.reduce((s, svc) => s + svc.act.totalPaid, 0)
   const totalDiff = totalActual - totalCatalog
 
-  const isLoading = invLoading || apptLoading || (loaded && detailsLoading)
+  const isLoading = invLoading || apptLoading || detailsLoading
 
   return (
     <div className="space-y-5">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <RangePicker preset={preset} customFrom={customFrom} customTo={customTo} today={today}
-          onPreset={setPreset} onFrom={setCustomFrom} onTo={setCustomTo} />
-        {!loaded && (
-          <button onClick={() => setLoaded(true)}
-            className="bg-rose-600 text-white px-5 py-2 rounded-lg text-sm font-medium hover:bg-rose-700 transition-colors">
-            تحميل البيانات
-          </button>
-        )}
-      </div>
-
-      {!loaded && (
-        <div className="bg-gray-50 border border-gray-200 rounded-xl p-10 text-center text-gray-400">
-          <Wrench size={36} className="mx-auto mb-2 text-gray-200" />
-          <p className="text-sm">اضغط <strong className="text-rose-600">تحميل البيانات</strong> لتحليل الفواتير</p>
-        </div>
-      )}
+      <RangePicker preset={preset} customFrom={customFrom} customTo={customTo} today={today}
+        onPreset={setPreset} onFrom={setCustomFrom} onTo={setCustomTo} />
 
       {isLoading && (
         <div className="flex flex-col items-center py-12 gap-3">
@@ -1948,7 +1931,7 @@ function ServiceDiscountTab({ slug, branchId }: { slug: string; branchId: string
         </div>
       )}
 
-      {loaded && !isLoading && (
+      {!isLoading && (
         <>
           {/* 3 summary cards */}
           <div className="grid grid-cols-3 gap-3">
