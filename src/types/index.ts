@@ -57,6 +57,8 @@ export interface InvoiceListItem {
   status: string
   subtotal: number
   total: number
+  totalPaid?: number
+  remaining?: number
   createdAt: string
   customerName?: string
   appointmentId?: string
@@ -224,3 +226,4 @@ export const ROLE_LABELS: Record<string, string> = {
   HR: 'موارد بشرية',
   BRANCH_MANAGER: 'مدير فرع',
 }
+

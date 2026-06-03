@@ -732,32 +732,32 @@ function EmployeesTab({ slug, branchId }: { slug: string; branchId: string | nul
     enabled: !!branchId && !!selectedEmpId,
   })
 
-  // Invoices — to get actual paid amount per appointment
+  // Invoices are the only revenue source for employee reports.
   const { data: invoicesForEmp } = useQuery({
-    queryKey: ['invoices-emp-report', slug],
-    queryFn: () => getInvoices(slug, { page: 1, pageSize: 500 }),
+    queryKey: ['invoices-emp-report', slug, dateFrom, dateTo],
+    queryFn: () => getInvoices(slug, { page: 1, pageSize: 500, dateFrom, dateTo }),
     enabled: !!slug,
   })
 
-  // Map: appointmentId → invoice total (actual paid)
+  // Map appointmentId to actual paid amount. Check-in alone must never count as revenue.
   const invoiceByAppt = useMemo(() => {
     const map: Record<string, number> = {}
     ;(invoicesForEmp?.items ?? [])
       .filter(inv => (inv.status === 'Paid' || inv.status === 'PartiallyPaid') && inv.appointmentId)
-      .forEach(inv => { map[inv.appointmentId!] = inv.total })
+      .forEach(inv => {
+        const paid = inv.totalPaid ?? inv.total ?? 0
+        map[inv.appointmentId!] = (map[inv.appointmentId!] ?? 0) + paid
+      })
     return map
   }, [invoicesForEmp])
 
   const apptItems = apptData?.items ?? []
   const selectedEmp = (employees ?? []).find(e => e.id === selectedEmpId)
 
-  // Statuses that mean "service was delivered / payment collected"
-  const PAID_STATUSES = new Set(['completed', 'checked_in', 'confirmed', 'attended'])
-
   const empStats = useMemo(() => {
     const byName: Record<string, {
       total: number; completed: number; checkedIn: number; noShow: number; cancelled: number
-      revenueAED: number   // actual invoice total (from appointmentId link)
+      revenueAED: number
       paidCount: number
     }> = {}
     apptItems.forEach(a => {
@@ -768,17 +768,15 @@ function EmployeesTab({ slug, branchId }: { slug: string; branchId: string | nul
       if (a.status === 'checked_in' || a.status === 'confirmed') byName[name].checkedIn++
       if (a.status === 'no_show') byName[name].noShow++
       if (a.status === 'cancelled') byName[name].cancelled++
-      // Count revenue for any "paid" status
-      if (PAID_STATUSES.has(a.status)) {
+
+      const actualPaid = invoiceByAppt[a.id]
+      if (actualPaid !== undefined) {
         byName[name].paidCount++
-        // Use actual invoice amount if linked, else fall back to servicePrice
-        const actualPaid = invoiceByAppt[a.id]
-        byName[name].revenueAED += actualPaid ?? a.servicePrice ?? 0
+        byName[name].revenueAED += actualPaid
       }
     })
     return byName
   }, [apptItems, invoiceByAppt])
-
   const totalRevenue = Object.values(empStats).reduce((s, e) => s + e.revenueAED, 0)
 
   // Attendance summary for selected employee
@@ -2190,3 +2188,4 @@ export default function Reports() {
     </div>
   )
 }
+
