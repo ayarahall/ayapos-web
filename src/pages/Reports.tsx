@@ -25,7 +25,7 @@ const fmt = (cents: number) =>
 const fmtN = (n: number) => new Intl.NumberFormat('ar-AE').format(n)
 
 type RangePreset = 'today' | 'week' | 'month' | 'custom'
-type ReportTab = 'sales' | 'appointments' | 'expenses' | 'employees' | 'custom'
+type ReportTab = 'sales' | 'appointments' | 'expenses' | 'employees' | 'revenue' | 'custom'
 
 function startOfWeek(iso: string) {
   const d = new Date(iso + 'T00:00:00')
@@ -1499,10 +1499,201 @@ function CustomReportBuilder({ slug, branchId }: { slug: string; branchId: strin
   )
 }
 
+// ─── Revenue tab ─────────────────────────────────────────────────────────────
+
+type RevenueView = 'employee' | 'service' | 'customer' | 'day'
+
+function RevenueTab({ slug, branchId }: { slug: string; branchId: string | null }) {
+  const today = todayInDubaiISO()
+  const [preset, setPreset] = useState<RangePreset>('month')
+  const [customFrom, setCustomFrom] = useState(today)
+  const [customTo, setCustomTo] = useState(today)
+  const [view, setView] = useState<RevenueView>('employee')
+
+  const { dateFrom, dateTo } = useMemo(() => {
+    if (preset === 'today') return { dateFrom: today, dateTo: today }
+    if (preset === 'week') return { dateFrom: startOfWeek(today), dateTo: today }
+    if (preset === 'month') return { dateFrom: startOfMonth(today), dateTo: today }
+    return { dateFrom: customFrom, dateTo: customTo }
+  }, [preset, customFrom, customTo, today])
+
+  const { data: apptData, isLoading } = useQuery({
+    queryKey: ['revenue-appts', slug, branchId ?? 'lb', dateFrom, dateTo],
+    queryFn: () => getAppointments(slug, { page: 1, pageSize: 500, dateFrom, dateTo }),
+    enabled: !!slug,
+  })
+
+  const completed = useMemo(() =>
+    (apptData?.items ?? []).filter(a => a.status === 'completed'),
+    [apptData])
+
+  const totalRevenue = useMemo(() =>
+    completed.reduce((s, a) => s + (a.servicePrice ?? 0), 0),
+    [completed])
+
+  // Group by dimension
+  const grouped = useMemo(() => {
+    const map: Record<string, { count: number; revenue: number }> = {}
+    completed.forEach(a => {
+      let key = ''
+      if (view === 'employee') key = a.resourceName || 'غير محدد'
+      else if (view === 'service') key = a.serviceName || 'غير محدد'
+      else if (view === 'customer') key = a.customerName || 'غير محدد'
+      else if (view === 'day') key = a.startAt.slice(0, 10)
+      if (!map[key]) map[key] = { count: 0, revenue: 0 }
+      map[key].count++
+      map[key].revenue += a.servicePrice ?? 0
+    })
+    return Object.entries(map).sort((a, b) => b[1].revenue - a[1].revenue)
+  }, [completed, view])
+
+  const maxRevenue = Math.max(...grouped.map(([, v]) => v.revenue), 1)
+
+  const VIEW_LABELS: Record<RevenueView, string> = {
+    employee: 'الموظف', service: 'الخدمة', customer: 'العميل', day: 'اليوم',
+  }
+
+  return (
+    <div className="space-y-5">
+      <div className="flex flex-wrap items-center gap-3 justify-between">
+        <RangePicker preset={preset} customFrom={customFrom} customTo={customTo} today={today}
+          onPreset={p => { setPreset(p) }} onFrom={setCustomFrom} onTo={setCustomTo} />
+
+        {/* View toggle */}
+        <div className="flex bg-gray-100 rounded-xl p-1">
+          {(['employee', 'service', 'customer', 'day'] as RevenueView[]).map(v => (
+            <button key={v} onClick={() => setView(v)}
+              className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors whitespace-nowrap
+                ${view === v ? 'bg-white text-rose-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
+              {VIEW_LABELS[v]}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Summary cards */}
+      <div className="grid grid-cols-3 gap-3">
+        <StatCard icon={TrendingUp} label="إجمالي الإيرادات" value={`${totalRevenue.toFixed(2)} AED`} color="rose" />
+        <StatCard icon={CalendarCheck} label="مواعيد مكتملة" value={fmtN(completed.length)} color="green" />
+        <StatCard icon={DollarSign} label={`متوسط لكل ${VIEW_LABELS[view]}`}
+          value={grouped.length > 0 ? `${(totalRevenue / grouped.length).toFixed(2)} AED` : '—'} color="amber" />
+      </div>
+
+      {isLoading ? (
+        <div className="flex justify-center py-12"><Spinner size="lg" className="text-rose-600" /></div>
+      ) : (
+        <Card title={`الإيرادات حسب ${VIEW_LABELS[view]}`}>
+          {grouped.length === 0 ? (
+            <p className="text-center text-gray-400 py-12 text-sm">لا توجد مواعيد مكتملة في هذه الفترة</p>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-gray-100 text-right bg-gray-50">
+                    <th className="px-4 py-2.5 text-xs font-semibold text-gray-500">#</th>
+                    <th className="px-4 py-2.5 text-xs font-semibold text-gray-500">{VIEW_LABELS[view]}</th>
+                    <th className="px-4 py-2.5 text-xs font-semibold text-gray-500 text-center">عدد المواعيد</th>
+                    <th className="px-4 py-2.5 text-xs font-semibold text-rose-600 text-center">الإيراد (AED)</th>
+                    <th className="px-4 py-2.5 text-xs font-semibold text-gray-400 text-center">% من الإجمالي</th>
+                    <th className="px-4 py-2.5 text-xs font-semibold text-gray-400 text-center">متوسط/موعد</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-50">
+                  {grouped.map(([key, val], i) => {
+                    const pct = totalRevenue > 0 ? (val.revenue / totalRevenue) * 100 : 0
+                    const barPct = maxRevenue > 0 ? (val.revenue / maxRevenue) * 100 : 0
+                    const avg = val.count > 0 ? val.revenue / val.count : 0
+                    return (
+                      <tr key={key} className="hover:bg-rose-50/30">
+                        <td className="px-4 py-2.5">
+                          <span className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold
+                            ${i === 0 ? 'bg-yellow-100 text-yellow-700' : i === 1 ? 'bg-gray-200 text-gray-600' : i === 2 ? 'bg-orange-100 text-orange-600' : 'bg-gray-100 text-gray-400'}`}>
+                            {i + 1}
+                          </span>
+                        </td>
+                        <td className="px-4 py-2.5">
+                          <div className="flex items-center gap-2">
+                            <div className="w-6 h-6 rounded-full bg-rose-100 flex items-center justify-center text-rose-700 text-xs font-bold flex-shrink-0">
+                              {key[0]}
+                            </div>
+                            <span className="font-medium text-gray-900">{key}</span>
+                          </div>
+                        </td>
+                        <td className="px-4 py-2.5 text-center text-gray-700 font-semibold">{val.count}</td>
+                        <td className="px-4 py-2.5 text-center">
+                          <span className="font-bold text-rose-700">{val.revenue.toFixed(2)}</span>
+                        </td>
+                        <td className="px-4 py-2.5">
+                          <div className="flex items-center gap-2">
+                            <div className="flex-1 h-2 bg-gray-100 rounded-full overflow-hidden">
+                              <div className="h-full rounded-full bg-rose-400 transition-all"
+                                style={{ width: `${barPct}%` }} />
+                            </div>
+                            <span className="text-xs text-gray-500 w-8 text-end">{pct.toFixed(0)}%</span>
+                          </div>
+                        </td>
+                        <td className="px-4 py-2.5 text-center text-gray-500 text-xs">{avg.toFixed(2)}</td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+                <tfoot>
+                  <tr className="border-t-2 border-gray-200 bg-rose-50 font-bold text-sm">
+                    <td className="px-4 py-2.5" colSpan={2}>الإجمالي ({grouped.length} {VIEW_LABELS[view]})</td>
+                    <td className="px-4 py-2.5 text-center text-gray-800">{completed.length}</td>
+                    <td className="px-4 py-2.5 text-center text-rose-700">{totalRevenue.toFixed(2)}</td>
+                    <td className="px-4 py-2.5 text-center text-gray-500">100%</td>
+                    <td className="px-4 py-2.5 text-center text-gray-500">
+                      {completed.length > 0 ? (totalRevenue / completed.length).toFixed(2) : '—'}
+                    </td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+          )}
+        </Card>
+      )}
+
+      {/* Bar chart */}
+      {grouped.length > 0 && !isLoading && (
+        <Card title={`رسم بياني — ${VIEW_LABELS[view]}`}>
+          <div className="px-4 py-4">
+            <div style={{ height: 110 }} className="relative w-full">
+              <div className="absolute inset-0 flex items-end gap-1" style={{ paddingBottom: 22 }}>
+                {grouped.slice(0, 20).map(([key, val], i) => {
+                  const pct = (val.revenue / maxRevenue) * 100
+                  return (
+                    <div key={i} className="flex-1 flex flex-col items-center justify-end h-full group relative">
+                      <div className="absolute bottom-full mb-1 hidden group-hover:block z-10 bg-gray-900 text-white rounded px-1.5 py-0.5 whitespace-nowrap pointer-events-none"
+                        style={{ fontSize: 10 }}>
+                        {key}: {val.revenue.toFixed(0)} AED
+                      </div>
+                      <div className="w-full rounded-t-md transition-all"
+                        style={{
+                          height: `${Math.max(3, pct)}%`,
+                          backgroundColor: i === 0 ? '#e40046' : i === 1 ? '#f43f5e' : i === 2 ? '#fb7185' : '#fda4af',
+                        }} />
+                      <div className="absolute w-full text-center truncate px-0.5"
+                        style={{ bottom: -22, fontSize: 7, color: '#9ca3af', lineHeight: '22px' }}>
+                        {key.slice(0, 6)}
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          </div>
+        </Card>
+      )}
+    </div>
+  )
+}
+
 // ─── Main Reports page ────────────────────────────────────────────────────────
 
 const TABS: { key: ReportTab; label: string; icon: React.ElementType }[] = [
   { key: 'sales', label: 'المبيعات', icon: TrendingUp },
+  { key: 'revenue', label: 'الإيرادات', icon: DollarSign },
   { key: 'appointments', label: 'المواعيد', icon: CalendarCheck },
   { key: 'expenses', label: 'المصاريف', icon: Receipt },
   { key: 'employees', label: 'الموظفون', icon: Users },
@@ -1541,6 +1732,7 @@ export default function Reports() {
 
       {/* Tab content */}
       {activeTab === 'sales' && <SalesTab slug={slug} branchId={branchId} />}
+      {activeTab === 'revenue' && <RevenueTab slug={slug} branchId={branchId} />}
       {activeTab === 'appointments' && <AppointmentsTab slug={slug} branchId={branchId} />}
       {activeTab === 'expenses' && <ExpensesTab slug={slug} />}
       {activeTab === 'employees' && <EmployeesTab slug={slug} branchId={branchId} />}
