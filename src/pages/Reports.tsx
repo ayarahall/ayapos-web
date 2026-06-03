@@ -2032,7 +2032,7 @@ function ServiceDiscountTab({ slug, branchId }: { slug: string; branchId: string
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-50">
-                    {services.map(({ name, cat, act, avgActualUnit, diff }) => (
+                    {services.map(({ name, act, avgActualUnit, diff }) => (
                       <tr key={name} className="hover:bg-rose-50/30">
                         <td className="px-3 py-2">
                           <div className="flex items-center gap-1.5">
