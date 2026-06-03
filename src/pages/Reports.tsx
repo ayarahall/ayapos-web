@@ -686,10 +686,17 @@ function EmployeesTab({ slug, branchId }: { slug: string; branchId: string | nul
     enabled: !!branchId,
   })
 
+  // Backend uses x.AttendanceDate < endDate (exclusive), so add 1 day to include today
+  const attendanceDateTo = useMemo(() => {
+    const d = new Date(dateTo + 'T00:00:00')
+    d.setDate(d.getDate() + 1)
+    return d.toISOString().slice(0, 10)
+  }, [dateTo])
+
   // Attendance history for selected employee
   const { data: attendanceHistory, isLoading: attendanceLoading } = useQuery({
-    queryKey: ['attendance-history', branchId, selectedEmpId, dateFrom, dateTo],
-    queryFn: () => getAttendanceHistory(branchId!, selectedEmpId!, dateFrom, dateTo),
+    queryKey: ['attendance-history', branchId, selectedEmpId, dateFrom, attendanceDateTo],
+    queryFn: () => getAttendanceHistory(branchId!, selectedEmpId!, dateFrom, attendanceDateTo),
     enabled: !!branchId && !!selectedEmpId,
   })
 
