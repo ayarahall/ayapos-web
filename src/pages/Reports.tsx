@@ -3,10 +3,10 @@ import { useQuery } from '@tanstack/react-query'
 import {
   BarChart3, TrendingUp, DollarSign, CreditCard, ShoppingBag,
   Building2, CalendarCheck, ChevronLeft, ChevronRight,
-  Users, Receipt, GripVertical, X, Plus, Eye,
+  Users, Receipt, GripVertical, X, Plus, Eye, Wrench,
 } from 'lucide-react'
 import { getDailySummary, getSessions } from '../api/cashier'
-import { getInvoices } from '../api/invoices'
+import { getInvoices, getInvoice } from '../api/invoices'
 import { getAppointments } from '../api/appointments'
 import { getExpenses } from '../api/expenses'
 import { listEmployees, getAttendanceHistory, getLeaves } from '../api/employees'
@@ -25,7 +25,7 @@ const fmt = (cents: number) =>
 const fmtN = (n: number) => new Intl.NumberFormat('ar-AE').format(n)
 
 type RangePreset = 'today' | 'week' | 'month' | 'custom'
-type ReportTab = 'sales' | 'appointments' | 'expenses' | 'employees' | 'revenue' | 'custom'
+type ReportTab = 'sales' | 'appointments' | 'expenses' | 'employees' | 'revenue' | 'services' | 'custom'
 
 function startOfWeek(iso: string) {
   const d = new Date(iso + 'T00:00:00')
@@ -1794,11 +1794,251 @@ function RevenueTab({ slug, branchId }: { slug: string; branchId: string | null 
   )
 }
 
+// ─── Services discount/actual tab ────────────────────────────────────────────
+
+function ServiceDiscountTab({ slug, branchId }: { slug: string; branchId: string | null }) {
+  const today = todayInDubaiISO()
+  const [preset, setPreset] = useState<RangePreset>('month')
+  const [customFrom, setCustomFrom] = useState(today)
+  const [customTo, setCustomTo] = useState(today)
+  const [loadDetails, setLoadDetails] = useState(false)
+
+  const { dateFrom, dateTo } = useMemo(() => {
+    if (preset === 'today') return { dateFrom: today, dateTo: today }
+    if (preset === 'week') return { dateFrom: startOfWeek(today), dateTo: today }
+    if (preset === 'month') return { dateFrom: startOfMonth(today), dateTo: today }
+    return { dateFrom: customFrom, dateTo: customTo }
+  }, [preset, customFrom, customTo, today])
+
+  // Appointments — for catalog price per service
+  const { data: apptData, isLoading: apptLoading } = useQuery({
+    queryKey: ['svc-appts', slug, branchId ?? 'lb', dateFrom, dateTo],
+    queryFn: () => getAppointments(slug, { page: 1, pageSize: 500, dateFrom, dateTo: addOneDay(dateTo) }),
+    enabled: !!slug,
+  })
+
+  // Invoices list — to identify which invoices to detail
+  const { data: invoicesData, isLoading: invLoading } = useQuery({
+    queryKey: ['svc-invoices', slug],
+    queryFn: () => getInvoices(slug, { page: 1, pageSize: 200 }),
+    enabled: !!slug && loadDetails,
+  })
+
+  // Filter invoices in range
+  const paidInvoicesInRange = useMemo(() =>
+    (invoicesData?.items ?? []).filter(inv => {
+      const d = inv.createdAt.slice(0, 10)
+      return (inv.status === 'Paid' || inv.status === 'PartiallyPaid') && d >= dateFrom && d <= dateTo
+    }).slice(0, 30), // limit to 30 invoices
+    [invoicesData, dateFrom, dateTo])
+
+  // Fetch details for each invoice (parallel, max 30)
+  const invoiceDetailsQueries = paidInvoicesInRange.map(inv =>
+    // eslint-disable-next-line react-hooks/rules-of-hooks
+    useQuery({
+      queryKey: ['invoice-detail', slug, inv.id],
+      queryFn: () => getInvoice(slug, inv.id),
+      enabled: loadDetails && paidInvoicesInRange.length > 0,
+      staleTime: 10 * 60 * 1000,
+    })
+  )
+
+  const detailsLoading = invoiceDetailsQueries.some(q => q.isLoading)
+  const allDetails = invoiceDetailsQueries.map(q => q.data).filter(Boolean)
+
+  // Aggregate actual price per service from invoice lines
+  const actualByService = useMemo(() => {
+    const map: Record<string, { qty: number; totalPaid: number }> = {}
+    allDetails.forEach(detail => {
+      if (!detail) return
+      const lines = detail.lines ?? detail.items ?? []
+      lines.filter(l => l.itemType === 'Service').forEach(line => {
+        const name = line.nameSnapshot ?? line.name ?? 'غير محدد'
+        if (!map[name]) map[name] = { qty: 0, totalPaid: 0 }
+        map[name].qty += line.qty ?? 1
+        const paid = line.lineTotal ?? (line.lineTotalCents ? line.lineTotalCents / 100 : 0)
+        map[name].totalPaid += paid
+      })
+    })
+    return map
+  }, [allDetails])
+
+  // Catalog price per service from appointments
+  const catalogByService = useMemo(() => {
+    const map: Record<string, { count: number; totalCatalog: number; unitPrice: number }> = {}
+    const appts = (apptData?.items ?? []).filter(a =>
+      a.status === 'completed' || a.status === 'checked_in' || a.status === 'confirmed'
+    )
+    appts.forEach(a => {
+      const name = a.serviceName || 'غير محدد'
+      if (!map[name]) map[name] = { count: 0, totalCatalog: 0, unitPrice: a.servicePrice ?? 0 }
+      map[name].count++
+      map[name].totalCatalog += a.servicePrice ?? 0
+      map[name].unitPrice = a.servicePrice ?? map[name].unitPrice
+    })
+    return map
+  }, [apptData])
+
+  // Merge: services from appointments + actual from invoices
+  const services = useMemo(() => {
+    const names = new Set([...Object.keys(catalogByService), ...Object.keys(actualByService)])
+    return [...names].map(name => {
+      const cat = catalogByService[name] ?? { count: 0, totalCatalog: 0, unitPrice: 0 }
+      const act = actualByService[name] ?? { qty: 0, totalPaid: 0 }
+      const actualPerUnit = act.qty > 0 ? act.totalPaid / act.qty : null
+      const diff = actualPerUnit !== null ? actualPerUnit - cat.unitPrice : null
+      return { name, cat, act, actualPerUnit, diff }
+    }).sort((a, b) => b.cat.totalCatalog - a.cat.totalCatalog)
+  }, [catalogByService, actualByService])
+
+  const totalCatalog = services.reduce((s, svc) => s + svc.cat.totalCatalog, 0)
+  const totalActual = services.reduce((s, svc) => s + svc.act.totalPaid, 0)
+  const totalDiff = totalActual - totalCatalog
+
+  const isLoading = apptLoading || (loadDetails && invLoading) || (loadDetails && detailsLoading)
+
+  return (
+    <div className="space-y-5">
+      <RangePicker preset={preset} customFrom={customFrom} customTo={customTo} today={today}
+        onPreset={setPreset} onFrom={setCustomFrom} onTo={setCustomTo} />
+
+      {/* Explanation */}
+      <div className="bg-blue-50 border border-blue-200 rounded-xl px-4 py-3 text-xs text-blue-700 space-y-1">
+        <p className="font-semibold">كيف يعمل هذا التقرير:</p>
+        <p>• <strong>سعر الكتالوج</strong>: سعر الخدمة من المواعيد (ما تم تسعيره عند الحجز)</p>
+        <p>• <strong>السعر المحصّل</strong>: المبلغ الفعلي المدفوع من بنود الفاتورة في نقطة البيع</p>
+        <p>• <strong>الفرق</strong>: سالب = خصم أُعطي للعميل، موجب = سعر أعلى من الكتالوج</p>
+      </div>
+
+      {/* Load details button */}
+      {!loadDetails && (
+        <div className="bg-white rounded-xl border border-gray-200 p-6 text-center">
+          <p className="text-sm text-gray-600 mb-3">لجلب السعر الفعلي من نقطة البيع، اضغط زر التحميل</p>
+          <button onClick={() => setLoadDetails(true)}
+            className="bg-rose-600 text-white px-6 py-2 rounded-lg text-sm font-medium hover:bg-rose-700 transition-colors">
+            تحميل بيانات الفواتير (آخر 30 فاتورة)
+          </button>
+        </div>
+      )}
+
+      {isLoading && (
+        <div className="flex flex-col items-center justify-center py-12 gap-3">
+          <Spinner size="lg" className="text-rose-600" />
+          <p className="text-sm text-gray-500">
+            {detailsLoading ? `جاري تحميل ${paidInvoicesInRange.length} فاتورة...` : 'جاري التحميل...'}
+          </p>
+        </div>
+      )}
+
+      {!isLoading && (loadDetails || Object.keys(catalogByService).length > 0) && (
+        <>
+          {/* Summary */}
+          <div className="grid grid-cols-3 gap-3">
+            <div className="bg-white rounded-xl border border-gray-200 p-4">
+              <p className="text-xs text-gray-500">إجمالي سعر الكتالوج</p>
+              <p className="text-xl font-bold text-gray-800 mt-1">{totalCatalog.toFixed(2)} AED</p>
+            </div>
+            <div className="bg-white rounded-xl border border-gray-200 p-4">
+              <p className="text-xs text-gray-500">إجمالي المحصّل فعلياً</p>
+              <p className="text-xl font-bold text-rose-700 mt-1">
+                {loadDetails ? totalActual.toFixed(2) : '—'} AED
+              </p>
+            </div>
+            <div className={`rounded-xl border p-4 ${totalDiff < 0 ? 'bg-red-50 border-red-200' : totalDiff > 0 ? 'bg-green-50 border-green-200' : 'bg-gray-50 border-gray-200'}`}>
+              <p className="text-xs text-gray-500">إجمالي الفرق (خصومات)</p>
+              <p className={`text-xl font-bold mt-1 ${totalDiff < 0 ? 'text-red-700' : totalDiff > 0 ? 'text-green-700' : 'text-gray-600'}`}>
+                {loadDetails ? `${totalDiff >= 0 ? '+' : ''}${totalDiff.toFixed(2)}` : '—'} AED
+              </p>
+            </div>
+          </div>
+
+          {/* Services table */}
+          <Card title={`تحليل الخدمات — سعر الكتالوج مقابل المحصّل (${services.length} خدمة)`}>
+            {loadDetails && paidInvoicesInRange.length > 0 && (
+              <div className="px-4 py-2 bg-blue-50 border-b border-blue-100 text-xs text-blue-600">
+                تم تحليل {paidInvoicesInRange.length} فاتورة — السعر الفعلي مشتق من بنود الفواتير
+              </div>
+            )}
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-gray-100 text-right bg-gray-50">
+                    <th className="px-4 py-2.5 text-xs font-semibold text-gray-500">الخدمة</th>
+                    <th className="px-4 py-2.5 text-xs font-semibold text-gray-500 text-center">مرات</th>
+                    <th className="px-4 py-2.5 text-xs font-semibold text-gray-600 text-center">سعر الكتالوج</th>
+                    <th className="px-4 py-2.5 text-xs font-semibold text-gray-600 text-center">إجمالي الكتالوج</th>
+                    {loadDetails && <>
+                      <th className="px-4 py-2.5 text-xs font-semibold text-rose-600 text-center">السعر المحصّل</th>
+                      <th className="px-4 py-2.5 text-xs font-semibold text-rose-600 text-center">إجمالي المحصّل</th>
+                      <th className="px-4 py-2.5 text-xs font-semibold text-amber-600 text-center">الفرق/وحدة</th>
+                    </>}
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-50">
+                  {services.map(({ name, cat, act, actualPerUnit, diff }) => (
+                    <tr key={name} className="hover:bg-gray-50">
+                      <td className="px-4 py-2.5">
+                        <div className="flex items-center gap-2">
+                          <div className="w-6 h-6 rounded-full bg-rose-100 flex items-center justify-center text-rose-700 text-xs font-bold flex-shrink-0">{name[0]}</div>
+                          <span className="font-medium text-gray-900 text-sm">{name}</span>
+                        </div>
+                      </td>
+                      <td className="px-4 py-2.5 text-center text-gray-700 font-semibold">{cat.count || act.qty}</td>
+                      <td className="px-4 py-2.5 text-center text-gray-600">{cat.unitPrice.toFixed(2)}</td>
+                      <td className="px-4 py-2.5 text-center text-gray-700 font-semibold">{cat.totalCatalog.toFixed(2)}</td>
+                      {loadDetails && <>
+                        <td className="px-4 py-2.5 text-center">
+                          {actualPerUnit !== null
+                            ? <span className="font-semibold text-rose-700">{actualPerUnit.toFixed(2)}</span>
+                            : <span className="text-gray-300 text-xs">لم يُحلَّل</span>}
+                        </td>
+                        <td className="px-4 py-2.5 text-center">
+                          {act.totalPaid > 0
+                            ? <span className="font-semibold text-rose-700">{act.totalPaid.toFixed(2)}</span>
+                            : <span className="text-gray-300 text-xs">—</span>}
+                        </td>
+                        <td className="px-4 py-2.5 text-center">
+                          {diff !== null && cat.unitPrice > 0 ? (
+                            <span className={`font-bold text-sm px-2 py-0.5 rounded-full ${diff < -0.01 ? 'bg-red-100 text-red-700' : diff > 0.01 ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}>
+                              {diff >= 0 ? '+' : ''}{diff.toFixed(2)}
+                            </span>
+                          ) : <span className="text-gray-300 text-xs">—</span>}
+                        </td>
+                      </>}
+                    </tr>
+                  ))}
+                </tbody>
+                <tfoot>
+                  <tr className="border-t-2 border-gray-200 bg-rose-50 font-bold">
+                    <td className="px-4 py-2.5 text-sm text-gray-700" colSpan={2}>الإجمالي</td>
+                    <td className="px-4 py-2.5 text-center text-gray-500 text-xs">—</td>
+                    <td className="px-4 py-2.5 text-center text-gray-800">{totalCatalog.toFixed(2)}</td>
+                    {loadDetails && <>
+                      <td className="px-4 py-2.5 text-center text-gray-500 text-xs">—</td>
+                      <td className="px-4 py-2.5 text-center text-rose-700">{totalActual.toFixed(2)}</td>
+                      <td className="px-4 py-2.5 text-center">
+                        <span className={`font-bold ${totalDiff < 0 ? 'text-red-700' : 'text-green-700'}`}>
+                          {totalDiff >= 0 ? '+' : ''}{totalDiff.toFixed(2)}
+                        </span>
+                      </td>
+                    </>}
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+          </Card>
+        </>
+      )}
+    </div>
+  )
+}
+
 // ─── Main Reports page ────────────────────────────────────────────────────────
 
 const TABS: { key: ReportTab; label: string; icon: React.ElementType }[] = [
   { key: 'sales', label: 'المبيعات', icon: TrendingUp },
   { key: 'revenue', label: 'الإيرادات', icon: DollarSign },
+  { key: 'services', label: 'الخدمات', icon: Wrench },
   { key: 'appointments', label: 'المواعيد', icon: CalendarCheck },
   { key: 'expenses', label: 'المصاريف', icon: Receipt },
   { key: 'employees', label: 'الموظفون', icon: Users },
@@ -1838,6 +2078,7 @@ export default function Reports() {
       {/* Tab content */}
       {activeTab === 'sales' && <SalesTab slug={slug} branchId={branchId} />}
       {activeTab === 'revenue' && <RevenueTab slug={slug} branchId={branchId} />}
+      {activeTab === 'services' && <ServiceDiscountTab slug={slug} branchId={branchId} />}
       {activeTab === 'appointments' && <AppointmentsTab slug={slug} branchId={branchId} />}
       {activeTab === 'expenses' && <ExpensesTab slug={slug} />}
       {activeTab === 'employees' && <EmployeesTab slug={slug} branchId={branchId} />}
