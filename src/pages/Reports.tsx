@@ -35,6 +35,13 @@ function startOfWeek(iso: string) {
 }
 function startOfMonth(iso: string) { return iso.slice(0, 7) + '-01' }
 
+// Backend appointments uses StartAt < dateTo (exclusive), so add 1 day to include dateTo
+function addOneDay(iso: string): string {
+  const d = new Date(iso + 'T00:00:00')
+  d.setDate(d.getDate() + 1)
+  return d.toISOString().slice(0, 10)
+}
+
 const payMethodLabel = (method: number | string) => {
   if (method === 1 || method === 'Cash') return 'نقدا'
   if (method === 2 || method === 'Card') return 'بطاقة'
@@ -438,7 +445,7 @@ function AppointmentsTab({ slug, branchId }: { slug: string; branchId: string | 
 
   const { data, isLoading } = useQuery({
     queryKey: ['appointments-report', slug, branchId ?? 'lb', dateFrom, dateTo],
-    queryFn: () => getAppointments(slug, { page: 1, pageSize: 300, dateFrom, dateTo }),
+    queryFn: () => getAppointments(slug, { page: 1, pageSize: 300, dateFrom, dateTo: addOneDay(dateTo) }),
     enabled: !!slug,
   })
 
@@ -676,7 +683,7 @@ function EmployeesTab({ slug, branchId }: { slug: string; branchId: string | nul
 
   const { data: apptData, isLoading: apptLoading } = useQuery({
     queryKey: ['appts-employees-report', slug, branchId ?? 'lb', dateFrom, dateTo],
-    queryFn: () => getAppointments(slug, { page: 1, pageSize: 300, dateFrom, dateTo }),
+    queryFn: () => getAppointments(slug, { page: 1, pageSize: 300, dateFrom, dateTo: addOneDay(dateTo) }),
     enabled: !!slug,
   })
 
@@ -1088,7 +1095,7 @@ function CustomReportBuilder({ slug, branchId }: { slug: string; branchId: strin
 
   const { data: apptData } = useQuery({
     queryKey: ['custom-report-appts', slug, branchId ?? 'lb', dateFrom, dateTo],
-    queryFn: () => getAppointments(slug, { page: 1, pageSize: 100, dateFrom, dateTo }),
+    queryFn: () => getAppointments(slug, { page: 1, pageSize: 100, dateFrom, dateTo: addOneDay(dateTo) }),
     enabled: !!slug && showPreview && neededGroups.has('appointment'),
   })
 
@@ -1519,7 +1526,7 @@ function RevenueTab({ slug, branchId }: { slug: string; branchId: string | null 
 
   const { data: apptData, isLoading } = useQuery({
     queryKey: ['revenue-appts', slug, branchId ?? 'lb', dateFrom, dateTo],
-    queryFn: () => getAppointments(slug, { page: 1, pageSize: 500, dateFrom, dateTo }),
+    queryFn: () => getAppointments(slug, { page: 1, pageSize: 500, dateFrom, dateTo: addOneDay(dateTo) }),
     enabled: !!slug,
   })
 
