@@ -1524,16 +1524,13 @@ function CustomReportBuilder({ slug, branchId }: { slug: string; branchId: strin
   )
 }
 
-// ─── Revenue tab ─────────────────────────────────────────────────────────────
-
-type RevenueView = 'employee' | 'service' | 'customer' | 'day'
+// ─── Revenue / P&L tab ───────────────────────────────────────────────────────
 
 function RevenueTab({ slug, branchId }: { slug: string; branchId: string | null }) {
   const today = todayInDubaiISO()
   const [preset, setPreset] = useState<RangePreset>('month')
   const [customFrom, setCustomFrom] = useState(today)
   const [customTo, setCustomTo] = useState(today)
-  const [view, setView] = useState<RevenueView>('day')
 
   const { dateFrom, dateTo } = useMemo(() => {
     if (preset === 'today') return { dateFrom: today, dateTo: today }
@@ -1542,243 +1539,256 @@ function RevenueTab({ slug, branchId }: { slug: string; branchId: string | null 
     return { dateFrom: customFrom, dateTo: customTo }
   }, [preset, customFrom, customTo, today])
 
-  // Primary source: invoices (actual POS payments)
+  // Invoices — source of truth for sales
   const { data: invoicesData, isLoading: invLoading } = useQuery({
-    queryKey: ['revenue-invoices', slug, branchId ?? 'lb', dateFrom, dateTo],
+    queryKey: ['pl-invoices', slug, branchId ?? 'lb'],
     queryFn: () => getInvoices(slug, { page: 1, pageSize: 500 }),
     enabled: !!slug,
   })
 
-  // Secondary source: appointments (for employee/service breakdown)
-  const { data: apptData, isLoading: apptLoading } = useQuery({
-    queryKey: ['revenue-appts', slug, branchId ?? 'lb', dateFrom, dateTo],
-    queryFn: () => getAppointments(slug, { page: 1, pageSize: 500, dateFrom, dateTo: addOneDay(dateTo) }),
-    enabled: !!slug && (view === 'employee' || view === 'service'),
-  })
-
-  // Sessions for cash/card/transfer breakdown
-  const { data: sessionsAllData } = useQuery({
-    queryKey: ['revenue-sessions', slug, branchId ?? 'lb'],
-    queryFn: () => getSessions(slug, { page: 1, pageSize: 50 }),
+  // Expenses
+  const { data: expData, isLoading: expLoading } = useQuery({
+    queryKey: ['pl-expenses', slug],
+    queryFn: () => getExpenses(slug, { page: 1, pageSize: 500 }),
     enabled: !!slug,
   })
 
-  const isLoading = invLoading || apptLoading
+  // Sessions — for cash/card/transfer breakdown
+  const { data: sessionsData, isLoading: sessLoading } = useQuery({
+    queryKey: ['pl-sessions', slug, branchId ?? 'lb'],
+    queryFn: () => getSessions(slug, { page: 1, pageSize: 100 }),
+    enabled: !!slug,
+  })
 
-  // Filter invoices by date range (client-side, Dubai timezone)
-  const paidInvoices = useMemo(() => {
-    return (invoicesData?.items ?? []).filter(inv => {
-      if (inv.status !== 'Paid' && inv.status !== 'PartiallyPaid') return false
-      const day = inv.createdAt.slice(0, 10)
-      return day >= dateFrom && day <= dateTo
+  const isLoading = invLoading || expLoading || sessLoading
+
+  // Filter by date range (client-side)
+  const paidInvoices = useMemo(() =>
+    (invoicesData?.items ?? []).filter(inv => {
+      const d = inv.createdAt.slice(0, 10)
+      return (inv.status === 'Paid' || inv.status === 'PartiallyPaid') && d >= dateFrom && d <= dateTo
+    }), [invoicesData, dateFrom, dateTo])
+
+  const periodExpenses = useMemo(() =>
+    (expData?.items ?? []).filter(exp => {
+      const d = exp.expenseDate?.slice(0, 10) ?? exp.createdAt.slice(0, 10)
+      return exp.status !== 'cancelled' && d >= dateFrom && d <= dateTo
+    }), [expData, dateFrom, dateTo])
+
+  const periodSessions = useMemo(() =>
+    (sessionsData?.items ?? []).filter(s => {
+      const d = s.openedAt.slice(0, 10)
+      return d >= dateFrom && d <= dateTo
+    }), [sessionsData, dateFrom, dateTo])
+
+  // Totals
+  const grossSales = paidInvoices.reduce((s, i) => s + i.total, 0)
+  const totalExpenses = periodExpenses.reduce((s, e) => s + e.amount, 0)
+  const netRevenue = grossSales - totalExpenses
+  const cashCents = periodSessions.reduce((s, sess) => s + sess.totalCashCents, 0)
+  const cardCents = periodSessions.reduce((s, sess) => s + sess.totalCardCents, 0)
+  const transferCents = periodSessions.reduce((s, sess) => s + sess.totalTransferCents, 0)
+
+  // Expenses by category
+  const expByCategory = useMemo(() => {
+    const map: Record<string, number> = {}
+    periodExpenses.forEach(e => {
+      map[e.category] = (map[e.category] ?? 0) + e.amount
     })
-  }, [invoicesData, dateFrom, dateTo])
+    return Object.entries(map).sort((a, b) => b[1] - a[1])
+  }, [periodExpenses])
 
-  // Total from invoices
-  const totalRevenue = useMemo(() =>
-    paidInvoices.reduce((s, inv) => s + inv.total, 0),
-    [paidInvoices])
+  // Daily P&L
+  const dailyPL = useMemo(() => {
+    const days = dateRange(dateFrom, dateTo)
+    const salesByDay: Record<string, number> = {}
+    const expByDay: Record<string, number> = {}
+    paidInvoices.forEach(inv => {
+      const d = inv.createdAt.slice(0, 10)
+      salesByDay[d] = (salesByDay[d] ?? 0) + inv.total
+    })
+    periodExpenses.forEach(exp => {
+      const d = exp.expenseDate?.slice(0, 10) ?? exp.createdAt.slice(0, 10)
+      expByDay[d] = (expByDay[d] ?? 0) + exp.amount
+    })
+    return days.map(d => ({
+      day: d,
+      label: d.slice(5),
+      sales: salesByDay[d] ?? 0,
+      expenses: expByDay[d] ?? 0,
+      net: (salesByDay[d] ?? 0) - (expByDay[d] ?? 0),
+    }))
+  }, [dateFrom, dateTo, paidInvoices, periodExpenses])
 
-  // Payment method totals from sessions (for day/customer views)
-  const sessionTotals = useMemo(() => {
-    const sessions = (sessionsAllData?.items ?? [])
-    return {
-      cashCents: sessions.reduce((s, sess) => s + sess.totalCashCents, 0),
-      cardCents: sessions.reduce((s, sess) => s + sess.totalCardCents, 0),
-      transferCents: sessions.reduce((s, sess) => s + sess.totalTransferCents, 0),
-    }
-  }, [sessionsAllData])
-
-  // Appointments that were paid (checked_in or completed = invoice was opened in POS)
-  const paidAppts = useMemo(() =>
-    (apptData?.items ?? []).filter(a =>
-      a.status === 'completed' || a.status === 'checked_in' || a.status === 'confirmed'
-    ),
-    [apptData])
-
-  // Group by dimension
-  const grouped = useMemo(() => {
-    const map: Record<string, { count: number; revenue: number }> = {}
-
-    if (view === 'employee' || view === 'service') {
-      // Use appointments for employee/service (have this info)
-      paidAppts.forEach(a => {
-        const key = view === 'employee'
-          ? (a.resourceName || 'غير محدد')
-          : (a.serviceName || 'غير محدد')
-        if (!map[key]) map[key] = { count: 0, revenue: 0 }
-        map[key].count++
-        map[key].revenue += a.servicePrice ?? 0
-      })
-    } else if (view === 'customer') {
-      // Use invoices for customer
-      paidInvoices.forEach(inv => {
-        const key = inv.customerName || 'عميل غير محدد'
-        if (!map[key]) map[key] = { count: 0, revenue: 0 }
-        map[key].count++
-        map[key].revenue += inv.total
-      })
-    } else if (view === 'day') {
-      // Use invoices for day-by-day (most accurate)
-      paidInvoices.forEach(inv => {
-        const key = inv.createdAt.slice(0, 10)
-        if (!map[key]) map[key] = { count: 0, revenue: 0 }
-        map[key].count++
-        map[key].revenue += inv.total
-      })
-    }
-
-    return Object.entries(map).sort((a, b) =>
-      view === 'day' ? a[0].localeCompare(b[0]) : b[1].revenue - a[1].revenue
-    )
-  }, [view, paidAppts, paidInvoices])
-
-  const maxRevenue = Math.max(...grouped.map(([, v]) => v.revenue), 1)
-
-  const VIEW_LABELS: Record<RevenueView, string> = {
-    employee: 'الموظف', service: 'الخدمة', customer: 'العميل', day: 'اليوم',
-  }
+  const maxBar = Math.max(...dailyPL.map(d => Math.max(d.sales, d.expenses)), 1)
 
   return (
     <div className="space-y-5">
-      <div className="flex flex-wrap items-center gap-3 justify-between">
-        <RangePicker preset={preset} customFrom={customFrom} customTo={customTo} today={today}
-          onPreset={p => { setPreset(p) }} onFrom={setCustomFrom} onTo={setCustomTo} />
-
-        {/* View toggle */}
-        <div className="flex bg-gray-100 rounded-xl p-1">
-          {(['employee', 'service', 'customer', 'day'] as RevenueView[]).map(v => (
-            <button key={v} onClick={() => setView(v)}
-              className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors whitespace-nowrap
-                ${view === v ? 'bg-white text-rose-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
-              {VIEW_LABELS[v]}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {/* Summary cards */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        <StatCard icon={TrendingUp} label="إجمالي المدفوع (فواتير)" value={`${totalRevenue.toFixed(2)} AED`} color="rose" />
-        <StatCard icon={ShoppingBag} label="فواتير مدفوعة" value={fmtN(paidInvoices.length)} color="green" />
-        <StatCard icon={DollarSign} label="نقدا (جلسات)" value={`${(sessionTotals.cashCents / 100).toFixed(2)} AED`} color="amber" />
-        <StatCard icon={CreditCard} label="بطاقة (جلسات)" value={`${(sessionTotals.cardCents / 100).toFixed(2)} AED`} color="purple" />
-      </div>
-
-      {(view === 'employee' || view === 'service') && (
-        <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-2.5 text-xs text-amber-700">
-          ⚠️ الإيراد للموظف/الخدمة مبني على سعر الخدمة من المواعيد — قد يختلف عن المبلغ المدفوع الفعلي في نقطة البيع.
-          للمبلغ الدقيق استخدم تقرير <strong>العميل</strong> أو <strong>اليوم</strong>.
-        </div>
-      )}
+      <RangePicker preset={preset} customFrom={customFrom} customTo={customTo} today={today}
+        onPreset={setPreset} onFrom={setCustomFrom} onTo={setCustomTo} />
 
       {isLoading ? (
         <div className="flex justify-center py-12"><Spinner size="lg" className="text-rose-600" /></div>
       ) : (
-        <Card title={`الإيرادات حسب ${VIEW_LABELS[view]}`}>
-          {grouped.length === 0 ? (
-            <p className="text-center text-gray-400 py-12 text-sm">لا توجد بيانات في هذه الفترة</p>
-          ) : (
+        <>
+          {/* Main P&L summary */}
+          <div className="grid grid-cols-3 gap-3">
+            <div className="bg-white rounded-xl border border-gray-200 p-4">
+              <p className="text-xs text-gray-500 mb-1">+ إجمالي المبيعات</p>
+              <p className="text-2xl font-bold text-green-700">{grossSales.toFixed(2)}</p>
+              <p className="text-xs text-gray-400 mt-0.5">AED · {paidInvoices.length} فاتورة</p>
+            </div>
+            <div className="bg-white rounded-xl border border-gray-200 p-4">
+              <p className="text-xs text-gray-500 mb-1">- إجمالي المصاريف</p>
+              <p className="text-2xl font-bold text-red-600">{totalExpenses.toFixed(2)}</p>
+              <p className="text-xs text-gray-400 mt-0.5">AED · {periodExpenses.length} مصروف</p>
+            </div>
+            <div className={`rounded-xl border p-4 ${netRevenue >= 0 ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-200'}`}>
+              <p className="text-xs text-gray-500 mb-1">= صافي الإيراد</p>
+              <p className={`text-2xl font-bold ${netRevenue >= 0 ? 'text-green-800' : 'text-red-700'}`}>
+                {netRevenue >= 0 ? '+' : ''}{netRevenue.toFixed(2)}
+              </p>
+              <p className="text-xs text-gray-400 mt-0.5">AED</p>
+            </div>
+          </div>
+
+          {/* Sales breakdown (payment methods) */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            <Card title="تفاصيل المبيعات — طرق الدفع">
+              <div className="px-4 py-3 space-y-3">
+                {[
+                  { label: 'نقداً', cents: cashCents, color: 'bg-amber-500' },
+                  { label: 'بطاقة', cents: cardCents, color: 'bg-purple-500' },
+                  { label: 'تحويل', cents: transferCents, color: 'bg-blue-500' },
+                ].map(({ label, cents, color }) => {
+                  const total = cashCents + cardCents + transferCents
+                  const pct = total > 0 ? ((cents / total) * 100).toFixed(0) : '0'
+                  return (
+                    <div key={label}>
+                      <div className="flex justify-between text-sm mb-1">
+                        <span className="text-gray-700">{label}</span>
+                        <span className="font-semibold text-gray-900">{(cents / 100).toFixed(2)} <span className="text-xs text-gray-400">({pct}%)</span></span>
+                      </div>
+                      <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
+                        <div className={`h-full rounded-full ${color}`} style={{ width: `${pct}%` }} />
+                      </div>
+                    </div>
+                  )
+                })}
+                <p className="text-xs text-gray-400 pt-1 border-t border-gray-100">مجموع الجلسات في الفترة</p>
+              </div>
+            </Card>
+
+            <Card title="تفاصيل المصاريف — حسب الفئة">
+              {expByCategory.length === 0 ? (
+                <p className="text-center text-gray-400 py-8 text-sm">لا توجد مصاريف</p>
+              ) : (
+                <div className="divide-y divide-gray-50">
+                  {expByCategory.map(([cat, amt]) => (
+                    <div key={cat} className="flex items-center gap-3 px-4 py-2.5">
+                      <span className="flex-1 text-sm text-gray-800">{cat}</span>
+                      <div className="w-28 h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                        <div className="h-full rounded-full bg-red-400"
+                          style={{ width: `${totalExpenses > 0 ? (amt / totalExpenses) * 100 : 0}%` }} />
+                      </div>
+                      <span className="text-sm font-semibold text-red-600 w-20 text-end">{amt.toFixed(2)}</span>
+                    </div>
+                  ))}
+                  <div className="flex items-center gap-3 px-4 py-2.5 bg-red-50 font-bold">
+                    <span className="flex-1 text-sm text-gray-700">الإجمالي</span>
+                    <span className="text-sm text-red-700">{totalExpenses.toFixed(2)} AED</span>
+                  </div>
+                </div>
+              )}
+            </Card>
+          </div>
+
+          {/* Daily bar chart — sales vs expenses */}
+          {dailyPL.length > 1 && (
+            <Card title="مبيعات يومية مقابل مصاريف">
+              <div className="px-4 py-4">
+                <div className="flex items-center gap-4 mb-3 text-xs">
+                  <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-sm bg-rose-500 inline-block" /> مبيعات</span>
+                  <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-sm bg-red-300 inline-block" /> مصاريف</span>
+                  <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-sm bg-green-500 inline-block" /> صافي</span>
+                </div>
+                <div style={{ height: 110 }} className="relative w-full">
+                  <div className="absolute inset-0 flex items-end gap-0.5" style={{ paddingBottom: 20 }}>
+                    {dailyPL.map((d, i) => (
+                      <div key={i} className="flex-1 flex items-end gap-px h-full group relative">
+                        {/* Tooltip */}
+                        <div className="absolute bottom-full mb-1 z-10 hidden group-hover:flex flex-col bg-gray-900 text-white rounded-lg px-2 py-1.5 text-xs whitespace-nowrap pointer-events-none shadow-lg gap-0.5">
+                          <span className="font-bold">{d.day}</span>
+                          <span className="text-green-400">مبيعات: {d.sales.toFixed(0)} AED</span>
+                          <span className="text-red-400">مصاريف: {d.expenses.toFixed(0)} AED</span>
+                          <span className={d.net >= 0 ? 'text-emerald-400' : 'text-orange-400'}>
+                            صافي: {d.net >= 0 ? '+' : ''}{d.net.toFixed(0)} AED
+                          </span>
+                        </div>
+                        {/* Sales bar */}
+                        <div className="flex-1 rounded-t-sm transition-all"
+                          style={{ height: `${Math.max(d.sales > 0 ? 2 : 0, (d.sales / maxBar) * 100)}%`, backgroundColor: '#e40046', opacity: 0.85 }} />
+                        {/* Expenses bar */}
+                        <div className="flex-1 rounded-t-sm transition-all"
+                          style={{ height: `${Math.max(d.expenses > 0 ? 2 : 0, (d.expenses / maxBar) * 100)}%`, backgroundColor: '#fca5a5' }} />
+                        {/* Day label */}
+                        <div className="absolute w-full text-center"
+                          style={{ bottom: -20, fontSize: 7, color: '#9ca3af', lineHeight: '20px' }}>
+                          {d.label}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </Card>
+          )}
+
+          {/* Daily P&L table */}
+          <Card title="تقرير يومي — مبيعات / مصاريف / صافي">
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b border-gray-100 text-right bg-gray-50">
-                    <th className="px-4 py-2.5 text-xs font-semibold text-gray-500">#</th>
-                    <th className="px-4 py-2.5 text-xs font-semibold text-gray-500">{VIEW_LABELS[view]}</th>
-                    <th className="px-4 py-2.5 text-xs font-semibold text-gray-500 text-center">عدد المواعيد</th>
-                    <th className="px-4 py-2.5 text-xs font-semibold text-rose-600 text-center">الإيراد (AED)</th>
-                    <th className="px-4 py-2.5 text-xs font-semibold text-gray-400 text-center">% من الإجمالي</th>
-                    <th className="px-4 py-2.5 text-xs font-semibold text-gray-400 text-center">متوسط/موعد</th>
+                    <th className="px-4 py-2.5 text-xs font-semibold text-gray-500">التاريخ</th>
+                    <th className="px-4 py-2.5 text-xs font-semibold text-green-700 text-center">مبيعات (AED)</th>
+                    <th className="px-4 py-2.5 text-xs font-semibold text-red-600 text-center">مصاريف (AED)</th>
+                    <th className="px-4 py-2.5 text-xs font-semibold text-gray-600 text-center">صافي (AED)</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-50">
-                  {grouped.map(([key, val], i) => {
-                    const pct = totalRevenue > 0 ? (val.revenue / totalRevenue) * 100 : 0
-                    const barPct = maxRevenue > 0 ? (val.revenue / maxRevenue) * 100 : 0
-                    const avg = val.count > 0 ? val.revenue / val.count : 0
-                    return (
-                      <tr key={key} className="hover:bg-rose-50/30">
-                        <td className="px-4 py-2.5">
-                          <span className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold
-                            ${i === 0 ? 'bg-yellow-100 text-yellow-700' : i === 1 ? 'bg-gray-200 text-gray-600' : i === 2 ? 'bg-orange-100 text-orange-600' : 'bg-gray-100 text-gray-400'}`}>
-                            {i + 1}
-                          </span>
-                        </td>
-                        <td className="px-4 py-2.5">
-                          <div className="flex items-center gap-2">
-                            <div className="w-6 h-6 rounded-full bg-rose-100 flex items-center justify-center text-rose-700 text-xs font-bold flex-shrink-0">
-                              {key[0]}
-                            </div>
-                            <span className="font-medium text-gray-900">{key}</span>
-                          </div>
-                        </td>
-                        <td className="px-4 py-2.5 text-center text-gray-700 font-semibold">{val.count}</td>
-                        <td className="px-4 py-2.5 text-center">
-                          <span className="font-bold text-rose-700">{val.revenue.toFixed(2)}</span>
-                        </td>
-                        <td className="px-4 py-2.5">
-                          <div className="flex items-center gap-2">
-                            <div className="flex-1 h-2 bg-gray-100 rounded-full overflow-hidden">
-                              <div className="h-full rounded-full bg-rose-400 transition-all"
-                                style={{ width: `${barPct}%` }} />
-                            </div>
-                            <span className="text-xs text-gray-500 w-8 text-end">{pct.toFixed(0)}%</span>
-                          </div>
-                        </td>
-                        <td className="px-4 py-2.5 text-center text-gray-500 text-xs">{avg.toFixed(2)}</td>
-                      </tr>
-                    )
-                  })}
+                  {dailyPL.filter(d => d.sales > 0 || d.expenses > 0).map(d => (
+                    <tr key={d.day} className="hover:bg-gray-50">
+                      <td className="px-4 py-2.5 text-gray-700 font-medium">{d.day}</td>
+                      <td className="px-4 py-2.5 text-center text-green-700 font-semibold">{d.sales > 0 ? d.sales.toFixed(2) : '—'}</td>
+                      <td className="px-4 py-2.5 text-center text-red-600 font-semibold">{d.expenses > 0 ? d.expenses.toFixed(2) : '—'}</td>
+                      <td className="px-4 py-2.5 text-center">
+                        <span className={`font-bold ${d.net >= 0 ? 'text-emerald-700' : 'text-orange-600'}`}>
+                          {d.net >= 0 ? '+' : ''}{d.net.toFixed(2)}
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                  {dailyPL.filter(d => d.sales > 0 || d.expenses > 0).length === 0 && (
+                    <tr><td colSpan={4} className="text-center py-10 text-gray-400">لا توجد بيانات في هذه الفترة</td></tr>
+                  )}
                 </tbody>
                 <tfoot>
-                  <tr className="border-t-2 border-gray-200 bg-rose-50 font-bold text-sm">
-                    <td className="px-4 py-2.5" colSpan={2}>الإجمالي ({grouped.length} {VIEW_LABELS[view]})</td>
-                    <td className="px-4 py-2.5 text-center text-gray-800">{grouped.reduce((s, [, v]) => s + v.count, 0)}</td>
-                    <td className="px-4 py-2.5 text-center text-rose-700">{grouped.reduce((s, [, v]) => s + v.revenue, 0).toFixed(2)}</td>
-                    <td className="px-4 py-2.5 text-center text-gray-500">100%</td>
-                    <td className="px-4 py-2.5 text-center text-gray-500">
-                      {grouped.reduce((s, [, v]) => s + v.count, 0) > 0
-                        ? (grouped.reduce((s, [, v]) => s + v.revenue, 0) / grouped.reduce((s, [, v]) => s + v.count, 0)).toFixed(2)
-                        : '—'}
+                  <tr className="border-t-2 border-gray-200 font-bold">
+                    <td className="px-4 py-2.5 text-gray-700">الإجمالي</td>
+                    <td className="px-4 py-2.5 text-center text-green-700">{grossSales.toFixed(2)}</td>
+                    <td className="px-4 py-2.5 text-center text-red-600">{totalExpenses.toFixed(2)}</td>
+                    <td className="px-4 py-2.5 text-center">
+                      <span className={`font-bold text-base ${netRevenue >= 0 ? 'text-emerald-700' : 'text-orange-600'}`}>
+                        {netRevenue >= 0 ? '+' : ''}{netRevenue.toFixed(2)} AED
+                      </span>
                     </td>
                   </tr>
                 </tfoot>
               </table>
             </div>
-          )}
-        </Card>
-      )}
-
-      {/* Bar chart */}
-      {grouped.length > 0 && !isLoading && (
-        <Card title={`رسم بياني — ${VIEW_LABELS[view]}`}>
-          <div className="px-4 py-4">
-            <div style={{ height: 110 }} className="relative w-full">
-              <div className="absolute inset-0 flex items-end gap-1" style={{ paddingBottom: 22 }}>
-                {grouped.slice(0, 20).map(([key, val], i) => {
-                  const pct = (val.revenue / maxRevenue) * 100
-                  return (
-                    <div key={i} className="flex-1 flex flex-col items-center justify-end h-full group relative">
-                      <div className="absolute bottom-full mb-1 hidden group-hover:block z-10 bg-gray-900 text-white rounded px-1.5 py-0.5 whitespace-nowrap pointer-events-none"
-                        style={{ fontSize: 10 }}>
-                        {key}: {val.revenue.toFixed(0)} AED
-                      </div>
-                      <div className="w-full rounded-t-md transition-all"
-                        style={{
-                          height: `${Math.max(3, pct)}%`,
-                          backgroundColor: i === 0 ? '#e40046' : i === 1 ? '#f43f5e' : i === 2 ? '#fb7185' : '#fda4af',
-                        }} />
-                      <div className="absolute w-full text-center truncate px-0.5"
-                        style={{ bottom: -22, fontSize: 7, color: '#9ca3af', lineHeight: '22px' }}>
-                        {key.slice(0, 6)}
-                      </div>
-                    </div>
-                  )
-                })}
-              </div>
-            </div>
-          </div>
-        </Card>
+          </Card>
+        </>
       )}
     </div>
   )
