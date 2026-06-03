@@ -45,7 +45,7 @@ export default function Products() {
   const createMut = useMutation({
     mutationFn: (f: ProductForm) => createProduct(slug, {
       nameAr: f.nameAr, nameEn: f.nameEn || undefined, sku: f.sku || undefined,
-      barcode: f.barcode || undefined, sellPrice: parseFloat(f.sellPrice),
+      barcode: f.barcode || undefined, sellPrice: f.sellPrice !== '' ? parseFloat(f.sellPrice) : 0,
       unit: f.unit || undefined, currencyCode: f.currencyCode, trackInventory: f.trackInventory,
     }),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['products', slug, branchId ?? 'login-branch'] }); closeModal() },
@@ -54,7 +54,7 @@ export default function Products() {
   const updateMut = useMutation({
     mutationFn: (f: ProductForm) => updateProduct(slug, editProduct!.id, {
       nameAr: f.nameAr, nameEn: f.nameEn || undefined, sku: f.sku || undefined,
-      barcode: f.barcode || undefined, sellPrice: parseFloat(f.sellPrice),
+      barcode: f.barcode || undefined, sellPrice: f.sellPrice !== '' ? parseFloat(f.sellPrice) : undefined,
       unit: f.unit || undefined, isActive: f.isActive,
     }),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['products', slug, branchId ?? 'login-branch'] }); closeModal() },

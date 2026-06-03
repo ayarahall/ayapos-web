@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef } from 'react'
+import { useEffect, useState, useRef, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import {
@@ -38,7 +38,7 @@ const isPastAppointment = (endAt: string) => new Date(endAt).getTime() < Date.no
 
 // ─── Widget config (localStorage) ────────────────────────────────────────────
 
-type WidgetId = 'stats' | 'appt-chart' | 'staff-productivity' | 'appt-live' | 'invoices-recent' | 'open-pos' | 'top-items' | 'daily-tasks' | 'expenses-pending'
+type WidgetId = 'stats' | 'appt-chart' | 'staff-productivity' | 'appt-live' | 'invoices-recent' | 'open-pos' | 'top-items' | 'daily-tasks' | 'expenses-pending' | 'sales-chart'
 
 interface WidgetConfig {
   id: WidgetId
@@ -47,6 +47,7 @@ interface WidgetConfig {
 
 const DEFAULT_WIDGETS: WidgetConfig[] = [
   { id: 'stats', visible: true },
+  { id: 'sales-chart', visible: true },
   { id: 'appt-chart', visible: true },
   { id: 'staff-productivity', visible: true },
   { id: 'invoices-recent', visible: true },
@@ -59,6 +60,7 @@ const DEFAULT_WIDGETS: WidgetConfig[] = [
 
 const WIDGET_LABELS: Record<WidgetId, string> = {
   stats: 'الإحصائيات',
+  'sales-chart': 'مبيعات الأسبوع — رسم بياني',
   'appt-chart': 'مواعيد اليوم — رسم بياني',
   'staff-productivity': 'إنتاجية الموظفين',
   'appt-live': 'مواعيد اليوم — الحالة الحية',
@@ -172,6 +174,78 @@ function CustomizePanel({
             </button>
           </div>
         ))}
+      </div>
+    </div>
+  )
+}
+
+// ─── Sales bar chart helper ───────────────────────────────────────────────────
+
+type SalesPeriod = 'week' | 'month'
+
+interface SalesBarItem { label: string; cents: number }
+
+function SalesBarChartWidget({ bars, period, onPeriod }: { bars: SalesBarItem[]; period: SalesPeriod; onPeriod: (p: SalesPeriod) => void }) {
+  const [tooltip, setTooltip] = useState<{ bar: SalesBarItem; x: number; y: number } | null>(null)
+  const maxCents = Math.max(...bars.map(b => b.cents), 1)
+  const chartH = 90
+  const barW = Math.max(20, Math.min(36, Math.floor(480 / (bars.length || 1)) - 8))
+  const gap = Math.max(5, barW * 0.25)
+  const paddingX = 6
+  const svgW = bars.length * (barW + gap) + paddingX * 2 - gap
+  const fmt = (cents: number) => new Intl.NumberFormat('ar-AE', { minimumFractionDigits: 0 }).format(cents / 100)
+
+  return (
+    <div className="px-4 py-3">
+      <div className="flex items-center justify-between mb-3">
+        <p className="text-xs text-gray-500">المبيعات (فواتير مدفوعة)</p>
+        <div className="flex bg-gray-100 rounded-lg p-0.5">
+          {(['week', 'month'] as SalesPeriod[]).map(p => (
+            <button key={p} onClick={() => onPeriod(p)}
+              className={`px-2.5 py-1 rounded-md text-xs font-medium transition-colors
+                ${period === p ? 'bg-white text-rose-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
+              {p === 'week' ? 'أسبوع' : 'شهر'}
+            </button>
+          ))}
+        </div>
+      </div>
+      <div className="relative w-full overflow-x-auto">
+        <svg width="100%" viewBox={`0 0 ${svgW} ${chartH + 30}`} className="overflow-visible min-w-[200px]">
+          {[0.25, 0.5, 0.75, 1].map(r => (
+            <line key={r} x1={0} y1={chartH * (1 - r)} x2={svgW} y2={chartH * (1 - r)} stroke="#f3f4f6" strokeWidth={1} />
+          ))}
+          {bars.map((bar, i) => {
+            const barH = Math.max(bar.cents > 0 ? 3 : 0, (bar.cents / maxCents) * chartH)
+            const x = paddingX + i * (barW + gap)
+            const y = chartH - barH
+            return (
+              <g key={bar.label}>
+                <rect x={x} y={y} width={barW} height={barH} rx={3}
+                  fill="#e40046" opacity={0.82}
+                  className="cursor-pointer transition-opacity hover:opacity-100"
+                  onMouseEnter={e => {
+                    const rect = (e.target as SVGRectElement).getBoundingClientRect()
+                    setTooltip({ bar, x: rect.left + rect.width / 2, y: rect.top })
+                  }}
+                  onMouseLeave={() => setTooltip(null)}
+                />
+                <text x={x + barW / 2} y={chartH + 14} textAnchor="middle" fontSize={8} fill="#9ca3af">
+                  {bar.label}
+                </text>
+              </g>
+            )
+          })}
+        </svg>
+        {tooltip && (
+          <div className="fixed z-50 pointer-events-none bg-gray-900 text-white text-xs rounded-lg px-2.5 py-1.5 shadow-lg"
+            style={{ left: tooltip.x, top: tooltip.y - 36, transform: 'translateX(-50%)' }}>
+            {tooltip.bar.label}: {fmt(tooltip.bar.cents)} AED
+          </div>
+        )}
+      </div>
+      <div className="flex items-center justify-between mt-2 text-xs text-gray-500">
+        <span>الإجمالي: <strong className="text-gray-900">{fmt(bars.reduce((s, b) => s + b.cents, 0))} AED</strong></span>
+        <span className="text-gray-400">{bars.filter(b => b.cents > 0).length} يوم بمبيعات</span>
       </div>
     </div>
   )
@@ -426,6 +500,7 @@ export default function Dashboard() {
   const slug = user?.tenantSlug ?? ''
   const isPlatform = user?.scope === 'platform'
   const [openPosDrafts, setOpenPosDrafts] = useState<PosDraftTab[]>(() => readPosDraftTabs())
+  const [salesPeriod, setSalesPeriod] = useState<SalesPeriod>('week')
 
   // Widget customization state
   const [widgets, setWidgets] = useState<WidgetConfig[]>(() => loadWidgets())
@@ -483,6 +558,37 @@ export default function Dashboard() {
     enabled: !!slug,
     select: (d) => d.items.filter((exp) => exp.expenseDate?.slice(0, 10) === today),
   })
+
+  // Sales chart: last 7 days or last 30 days invoices
+  const salesChartFrom = useMemo(() => {
+    const d = new Date(today + 'T00:00:00')
+    d.setDate(d.getDate() - (salesPeriod === 'week' ? 6 : 29))
+    return d.toISOString().slice(0, 10)
+  }, [today, salesPeriod])
+
+  const { data: salesChartData } = useQuery({
+    queryKey: ['invoices-sales-chart', slug, branchId ?? 'login-branch', salesChartFrom, today],
+    queryFn: () => getInvoices(slug, { page: 1, pageSize: 300, dateFrom: salesChartFrom, dateTo: today }),
+    enabled: !!slug,
+  })
+
+  const salesBars = useMemo<SalesBarItem[]>(() => {
+    const days: string[] = []
+    const cur = new Date(salesChartFrom + 'T00:00:00')
+    const end = new Date(today + 'T00:00:00')
+    while (cur <= end) { days.push(cur.toISOString().slice(0, 10)); cur.setDate(cur.getDate() + 1) }
+    const byDay: Record<string, number> = {}
+    ;(salesChartData?.items ?? [])
+      .filter(inv => inv.status === 'Paid')
+      .forEach(inv => {
+        const day = inv.createdAt.slice(0, 10)
+        byDay[day] = (byDay[day] ?? 0) + Math.round(inv.total * 100)
+      })
+    return days.map(d => {
+      const parts = d.slice(5).split('-')
+      return { label: `${parts[1]}/${parts[0]}`, cents: byDay[d] ?? 0 }
+    })
+  }, [salesChartFrom, today, salesChartData])
 
   const hour = new Date().getHours()
   const greeting = hour < 12 ? t.dashboard.goodMorning : hour < 17 ? t.dashboard.goodAfternoon : t.dashboard.goodEvening
@@ -639,6 +745,13 @@ export default function Dashboard() {
         )
       )}
 
+      {/* Sales chart widget */}
+      {isVisible('sales-chart') && (
+        <Card title={salesPeriod === 'week' ? 'مبيعات آخر 7 أيام' : 'مبيعات آخر 30 يوم'} className="lg:col-span-3">
+          <SalesBarChartWidget bars={salesBars} period={salesPeriod} onPeriod={setSalesPeriod} />
+        </Card>
+      )}
+
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Bar chart widget */}
         {isVisible('appt-chart') && (
@@ -720,7 +833,7 @@ export default function Dashboard() {
                         <p className="truncate text-sm font-semibold text-gray-900">{draft.customerName || draft.label}</p>
                         <p className="mt-0.5 truncate text-xs text-gray-500">{draft.items.length} {lang === 'ar' ? 'بند - لم يتم الدفع بعد' : 'items - unpaid'}</p>
                       </div>
-                      <div className="text-left">
+                      <div className="text-end">
                         <p className="text-sm font-bold text-gray-900">{fmt(totalCents)} AED</p>
                         <Badge variant="yellow">{lang === 'ar' ? 'مفتوحة' : 'Open'}</Badge>
                       </div>

@@ -447,7 +447,7 @@ function ProductsTab({ tenantSlug, branchId }: { tenantSlug: string; branchId: s
       nameEn: editForm.nameEn || undefined,
       sku: editForm.sku || undefined,
       barcode: editForm.barcode || undefined,
-      sellPrice: parseFloat(editForm.sellPrice) || undefined,
+      sellPrice: editForm.sellPrice !== '' ? parseFloat(editForm.sellPrice) : undefined,
       unit: editForm.unit || undefined,
     }),
     onSuccess: () => {
