@@ -214,6 +214,13 @@ function SalesTab({ slug, branchId }: { slug: string; branchId: string | null })
     enabled: !!slug && !isToday,
   })
 
+  // All today's sessions — for cash/card/transfer breakdown
+  const { data: todaySessionsData } = useQuery({
+    queryKey: ['cashier-sessions-today', slug, branchId ?? 'lb'],
+    queryFn: () => getSessions(slug, { page: 1, pageSize: 20 }),
+    enabled: !!slug && isToday,
+  })
+
   const { data: sessionsData, isLoading: sessionsLoading } = useQuery({
     queryKey: ['cashier-sessions', slug, branchId ?? 'lb', sessionPage],
     queryFn: () => getSessions(slug, { page: sessionPage, pageSize: 10 }),
@@ -222,15 +229,27 @@ function SalesTab({ slug, branchId }: { slug: string; branchId: string | null })
 
   const invoiceItems = invoicesData?.items ?? []
 
+  // Aggregate payment methods from today's sessions
+  const todayPayments = useMemo(() => {
+    const sessions = todaySessionsData?.items ?? []
+    return {
+      cashCents: sessions.reduce((s, sess) => s + sess.totalCashCents, 0),
+      cardCents: sessions.reduce((s, sess) => s + sess.totalCardCents, 0),
+      transferCents: sessions.reduce((s, sess) => s + sess.totalTransferCents, 0),
+    }
+  }, [todaySessionsData])
+
   const stats = useMemo(() => {
     if (isToday && summary) {
+      const totalSalesCents = summary.grossSalesCents ?? summary.totalSalesCents ?? 0
       return {
         totalInvoices: summary.invoiceCount ?? summary.totalInvoices ?? 0,
         paidInvoices: summary.paidInvoiceCount ?? 0,
-        totalSalesCents: summary.grossSalesCents ?? summary.totalSalesCents ?? 0,
-        cashCents: summary.totalCashCents ?? 0,
-        cardCents: summary.totalCardCents ?? 0,
-        transferCents: summary.totalTransferCents ?? 0,
+        totalSalesCents,
+        // getDailySummary doesn't return payment method breakdown — use sessions
+        cashCents: todayPayments.cashCents,
+        cardCents: todayPayments.cardCents,
+        transferCents: todayPayments.transferCents,
         topItems: [
           ...(summary.topProducts ?? []).map(i => ({ name: i.name, qty: i.quantity, totalCents: i.totalCents })),
           ...(summary.topServices ?? []).map(i => ({ name: i.name, qty: i.quantity, totalCents: i.totalCents })),
@@ -248,16 +267,15 @@ function SalesTab({ slug, branchId }: { slug: string; branchId: string | null })
       cashCents: 0, cardCents: 0, transferCents: 0,
       topItems: [], recentPayments: [],
     }
-  }, [isToday, summary, invoiceItems])
+  }, [isToday, summary, invoiceItems, todayPayments])
 
-  // Build bar chart: group invoices by day
+  // Build bar chart
   const salesBars = useMemo<SalesBar[]>(() => {
-    if (isToday && summary) {
-      const s = summary
+    if (isToday) {
       return [
-        { label: 'نقدا', cents: s.totalCashCents ?? 0 },
-        { label: 'بطاقة', cents: s.totalCardCents ?? 0 },
-        { label: 'تحويل', cents: s.totalTransferCents ?? 0 },
+        { label: 'نقدا', cents: todayPayments.cashCents },
+        { label: 'بطاقة', cents: todayPayments.cardCents },
+        { label: 'تحويل', cents: todayPayments.transferCents },
       ]
     }
     const days = dateRange(dateFrom, dateTo)
@@ -270,7 +288,7 @@ function SalesTab({ slug, branchId }: { slug: string; branchId: string | null })
       label: formatShortDate(d + 'T00:00:00', lang).slice(0, 5),
       cents: byDay[d] ?? 0,
     }))
-  }, [isToday, summary, dateFrom, dateTo, invoiceItems, lang])
+  }, [isToday, todayPayments, dateFrom, dateTo, invoiceItems, lang])
 
   const totalSales = stats.totalSalesCents
   const cashPct = totalSales > 0 ? ((stats.cashCents / totalSales) * 100).toFixed(0) : '0'
