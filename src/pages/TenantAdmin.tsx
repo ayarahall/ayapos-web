@@ -645,7 +645,7 @@ function ServicesTab({ tenantSlug, branchId }: { tenantSlug: string; branchId: s
       nameAr: form.nameAr,
       nameEn: form.nameEn || undefined,
       durationMin: form.durationMin ? parseInt(form.durationMin) : undefined,
-      priceCents: Math.round((parseFloat(form.priceCents) || 0) * 100),
+      price: parseFloat(form.priceCents) || 0,
     }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['admin-services', tenantSlug] })
@@ -665,6 +665,7 @@ function ServicesTab({ tenantSlug, branchId }: { tenantSlug: string; branchId: s
       nameAr: editForm.nameAr || undefined,
       nameEn: editForm.nameEn || undefined,
       durationMin: editForm.durationMin ? parseInt(editForm.durationMin) : undefined,
+      price: editForm.priceCents !== '' ? parseFloat(editForm.priceCents) : undefined,
     }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['admin-services', tenantSlug] })

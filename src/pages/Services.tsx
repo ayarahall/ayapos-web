@@ -43,12 +43,12 @@ export default function Services() {
     : (data?.items ?? [])
 
   const createMut = useMutation({
-    mutationFn: (f: ServiceForm) => createService(slug, { nameAr: f.nameAr, nameEn: f.nameEn || undefined, durationMin: f.durationMin ? parseInt(f.durationMin) : undefined, priceCents: Math.round(parseFloat(f.price) * 100), currencyCode: f.currencyCode }),
+    mutationFn: (f: ServiceForm) => createService(slug, { nameAr: f.nameAr, nameEn: f.nameEn || undefined, durationMin: f.durationMin ? parseInt(f.durationMin) : undefined, price: parseFloat(f.price) || 0, currencyCode: f.currencyCode }),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['services', slug, branchId ?? 'login-branch'] }); closeModal() },
   })
 
   const updateMut = useMutation({
-    mutationFn: (f: ServiceForm) => updateService(slug, editService!.id, { nameAr: f.nameAr, nameEn: f.nameEn || undefined, durationMin: f.durationMin ? parseInt(f.durationMin) : undefined, isActive: f.isActive }),
+    mutationFn: (f: ServiceForm) => updateService(slug, editService!.id, { nameAr: f.nameAr, nameEn: f.nameEn || undefined, durationMin: f.durationMin ? parseInt(f.durationMin) : undefined, price: f.price !== '' ? parseFloat(f.price) : undefined, isActive: f.isActive }),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['services', slug, branchId ?? 'login-branch'] }); closeModal() },
   })
 

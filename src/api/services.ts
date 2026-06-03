@@ -18,8 +18,9 @@ export async function createService(
     nameAr: string
     nameEn?: string
     durationMin?: number
-    priceCents: number
+    price: number        // decimal AED e.g. 50.00
     currencyCode?: string
+    isActive?: boolean
   }
 ): Promise<{ id: string }> {
   const res = await client.post<{ id: string }>(`/t/${tenantSlug}/services`, payload)
@@ -33,7 +34,9 @@ export async function updateService(
     nameAr?: string
     nameEn?: string
     durationMin?: number
+    price?: number       // decimal AED e.g. 50.00
     isActive?: boolean
+    currencyCode?: string
   }
 ): Promise<{ id: string }> {
   const res = await client.post<{ id: string }>(`/t/${tenantSlug}/services/${id}`, payload)
