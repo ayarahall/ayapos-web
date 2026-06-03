@@ -735,21 +735,28 @@ function EmployeesTab({ slug, branchId }: { slug: string; branchId: string | nul
   const apptItems = apptData?.items ?? []
   const selectedEmp = (employees ?? []).find(e => e.id === selectedEmpId)
 
+  // Statuses that mean "service was delivered / payment collected"
+  const PAID_STATUSES = new Set(['completed', 'checked_in', 'confirmed', 'attended'])
+
   const empStats = useMemo(() => {
     const byName: Record<string, {
-      total: number; completed: number; noShow: number; cancelled: number
-      revenueAED: number   // sum of servicePrice for completed appointments
+      total: number; completed: number; checkedIn: number; noShow: number; cancelled: number
+      revenueAED: number   // servicePrice for all paid-statuses (checked_in + completed)
+      paidCount: number    // appointments with paid status
     }> = {}
     apptItems.forEach(a => {
       const name = a.resourceName || 'غير محدد'
-      if (!byName[name]) byName[name] = { total: 0, completed: 0, noShow: 0, cancelled: 0, revenueAED: 0 }
+      if (!byName[name]) byName[name] = { total: 0, completed: 0, checkedIn: 0, noShow: 0, cancelled: 0, revenueAED: 0, paidCount: 0 }
       byName[name].total++
-      if (a.status === 'completed') {
-        byName[name].completed++
-        byName[name].revenueAED += a.servicePrice ?? 0
-      }
+      if (a.status === 'completed') byName[name].completed++
+      if (a.status === 'checked_in' || a.status === 'confirmed') byName[name].checkedIn++
       if (a.status === 'no_show') byName[name].noShow++
       if (a.status === 'cancelled') byName[name].cancelled++
+      // Count revenue for any "paid" status
+      if (PAID_STATUSES.has(a.status)) {
+        byName[name].paidCount++
+        byName[name].revenueAED += a.servicePrice ?? 0
+      }
     })
     return byName
   }, [apptItems])
@@ -793,10 +800,12 @@ function EmployeesTab({ slug, branchId }: { slug: string; branchId: string | nul
           </div>
 
           {/* Revenue per employee — main table */}
-          <Card title="إيرادات الموظفين — المواعيد المكتملة">
-            <div className="px-4 py-2 border-b border-gray-100 bg-rose-50 flex items-center justify-between">
-              <p className="text-xs text-gray-500">المبلغ = مجموع سعر الخدمة للمواعيد المكتملة (تم الدفع عبر نقطة البيع)</p>
-              <p className="text-sm font-bold text-rose-700">{totalRevenue.toFixed(2)} AED إجمالي</p>
+          <Card title="إيرادات الموظفين — المواعيد المُنجزة">
+            <div className="px-4 py-2 border-b border-gray-100 bg-rose-50 flex items-center justify-between flex-wrap gap-2">
+              <p className="text-xs text-gray-500">
+                الإيراد = سعر الخدمة من المواعيد التي تم فيها الحضور أو الإنجاز (checked_in + completed)
+              </p>
+              <p className="text-sm font-bold text-rose-700">{totalRevenue.toFixed(2)} AED</p>
             </div>
             {Object.keys(empStats).length === 0 ? (
               <p className="text-center text-gray-400 py-10 text-sm">لا توجد بيانات في هذه الفترة</p>
@@ -804,13 +813,13 @@ function EmployeesTab({ slug, branchId }: { slug: string; branchId: string | nul
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead>
-                    <tr className="border-b border-gray-100 text-right">
+                    <tr className="border-b border-gray-100 text-right bg-gray-50">
                       <th className="px-4 py-2.5 text-xs font-semibold text-gray-500">الموظف</th>
-                      <th className="px-3 py-2.5 text-xs font-semibold text-gray-500 text-center">مواعيد</th>
-                      <th className="px-3 py-2.5 text-xs font-semibold text-gray-500 text-center">مكتملة</th>
-                      <th className="px-3 py-2.5 text-xs font-semibold text-gray-500 text-center">لم يحضر</th>
-                      <th className="px-3 py-2.5 text-xs font-semibold text-gray-500 text-center">ملغي</th>
-                      <th className="px-3 py-2.5 text-xs font-semibold text-gray-500 text-center">معدل الإتمام</th>
+                      <th className="px-3 py-2.5 text-xs font-semibold text-gray-500 text-center">إجمالي</th>
+                      <th className="px-3 py-2.5 text-xs font-semibold text-blue-600 text-center">حضر+كاشير</th>
+                      <th className="px-3 py-2.5 text-xs font-semibold text-green-600 text-center">مكتمل</th>
+                      <th className="px-3 py-2.5 text-xs font-semibold text-red-500 text-center">لم يحضر</th>
+                      <th className="px-3 py-2.5 text-xs font-semibold text-gray-400 text-center">ملغي</th>
                       <th className="px-3 py-2.5 text-xs font-semibold text-rose-600 text-center">الإيراد (AED)</th>
                       <th className="px-3 py-2.5 text-xs font-semibold text-gray-400 text-center">% من الإجمالي</th>
                     </tr>
@@ -829,22 +838,28 @@ function EmployeesTab({ slug, branchId }: { slug: string; branchId: string | nul
                                   style={{ backgroundColor: emp?.appointmentColor ?? '#e40046' }}>
                                   {name[0]}
                                 </div>
-                                <span className="font-medium text-gray-900 text-sm">{name}</span>
+                                <div>
+                                  <span className="font-medium text-gray-900 text-sm">{name}</span>
+                                  {s.revenueAED === 0 && s.paidCount > 0 && (
+                                    <p className="text-xs text-amber-600">⚠️ سعر الخدمة = 0 في النظام</p>
+                                  )}
+                                </div>
                               </div>
                             </td>
-                            <td className="px-3 py-2.5 text-center font-semibold text-gray-700 text-sm">{s.total}</td>
-                            <td className="px-3 py-2.5 text-center text-green-700 font-semibold text-sm">{s.completed}</td>
-                            <td className="px-3 py-2.5 text-center text-red-500 font-semibold text-sm">{s.noShow}</td>
-                            <td className="px-3 py-2.5 text-center text-gray-400 font-semibold text-sm">{s.cancelled}</td>
+                            <td className="px-3 py-2.5 text-center font-semibold text-gray-700">{s.total}</td>
+                            <td className="px-3 py-2.5 text-center text-blue-700 font-semibold">{s.checkedIn}</td>
+                            <td className="px-3 py-2.5 text-center text-green-700 font-semibold">{s.completed}</td>
+                            <td className="px-3 py-2.5 text-center text-red-500 font-semibold">{s.noShow}</td>
+                            <td className="px-3 py-2.5 text-center text-gray-400 font-semibold">{s.cancelled}</td>
                             <td className="px-3 py-2.5 text-center">
-                              <span className={`font-bold text-sm ${s.total > 0 && (s.completed / s.total) >= 0.7 ? 'text-green-600' : 'text-amber-600'}`}>
-                                {s.total > 0 ? `${Math.round((s.completed / s.total) * 100)}%` : '—'}
-                              </span>
+                              {s.revenueAED > 0
+                                ? <span className="font-bold text-rose-700">{s.revenueAED.toFixed(2)}</span>
+                                : <span className="text-xs text-amber-600 font-medium">
+                                    {s.paidCount > 0 ? `${s.paidCount} موعد — سعر 0` : '—'}
+                                  </span>
+                              }
                             </td>
-                            <td className="px-3 py-2.5 text-center">
-                              <span className="font-bold text-rose-700 text-sm">{s.revenueAED.toFixed(2)}</span>
-                            </td>
-                            <td className="px-3 py-2.5 text-center">
+                            <td className="px-3 py-2.5">
                               <div className="flex items-center gap-1.5">
                                 <div className="flex-1 h-1.5 bg-gray-100 rounded-full overflow-hidden">
                                   <div className="h-full rounded-full bg-rose-400" style={{ width: `${revPct}%` }} />
@@ -859,21 +874,27 @@ function EmployeesTab({ slug, branchId }: { slug: string; branchId: string | nul
                   <tfoot>
                     <tr className="border-t-2 border-gray-200 bg-rose-50 font-bold">
                       <td className="px-4 py-2.5 text-sm text-gray-700">الإجمالي</td>
-                      <td className="px-3 py-2.5 text-center text-sm">{apptItems.length}</td>
-                      <td className="px-3 py-2.5 text-center text-green-700 text-sm">{Object.values(empStats).reduce((s, e) => s + e.completed, 0)}</td>
-                      <td className="px-3 py-2.5 text-center text-red-500 text-sm">{Object.values(empStats).reduce((s, e) => s + e.noShow, 0)}</td>
-                      <td className="px-3 py-2.5 text-center text-gray-400 text-sm">{Object.values(empStats).reduce((s, e) => s + e.cancelled, 0)}</td>
-                      <td className="px-3 py-2.5 text-center text-sm">
-                        {apptItems.length > 0 ? `${Math.round((Object.values(empStats).reduce((s, e) => s + e.completed, 0) / apptItems.length) * 100)}%` : '—'}
-                      </td>
-                      <td className="px-3 py-2.5 text-center text-rose-700 text-sm font-bold">{totalRevenue.toFixed(2)}</td>
-                      <td className="px-3 py-2.5 text-center text-sm text-gray-500">100%</td>
+                      <td className="px-3 py-2.5 text-center">{apptItems.length}</td>
+                      <td className="px-3 py-2.5 text-center text-blue-700">{Object.values(empStats).reduce((s, e) => s + e.checkedIn, 0)}</td>
+                      <td className="px-3 py-2.5 text-center text-green-700">{Object.values(empStats).reduce((s, e) => s + e.completed, 0)}</td>
+                      <td className="px-3 py-2.5 text-center text-red-500">{Object.values(empStats).reduce((s, e) => s + e.noShow, 0)}</td>
+                      <td className="px-3 py-2.5 text-center text-gray-400">{Object.values(empStats).reduce((s, e) => s + e.cancelled, 0)}</td>
+                      <td className="px-3 py-2.5 text-center text-rose-700">{totalRevenue.toFixed(2)}</td>
+                      <td className="px-3 py-2.5 text-center text-gray-500">100%</td>
                     </tr>
                   </tfoot>
                 </table>
               </div>
             )}
           </Card>
+
+          {/* Warning if some employees have paid appointments with 0 price */}
+          {Object.values(empStats).some(e => e.paidCount > 0 && e.revenueAED === 0) && (
+            <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 text-xs text-amber-700">
+              <p className="font-semibold mb-1">⚠️ بعض المواعيد فيها سعر خدمة = 0</p>
+              <p>هذا يحصل مع البيانات المهاجرة من النظام القديم أو لما يُضاف موعد بدون سعر. عشان تشوف الإيراد الفعلي، روحي لتاب <strong>الإيرادات</strong> اللي يعتمد على الفواتير المدفوعة مباشرة.</p>
+            </div>
+          )}
 
           {/* Employee list with select for detail */}
           <Card title="تفاصيل الموظف — الدوام والإجازات">
