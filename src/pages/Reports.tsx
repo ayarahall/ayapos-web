@@ -711,17 +711,25 @@ function EmployeesTab({ slug, branchId }: { slug: string; branchId: string | nul
   const selectedEmp = (employees ?? []).find(e => e.id === selectedEmpId)
 
   const empStats = useMemo(() => {
-    const byName: Record<string, { total: number; completed: number; noShow: number; cancelled: number }> = {}
+    const byName: Record<string, {
+      total: number; completed: number; noShow: number; cancelled: number
+      revenueAED: number   // sum of servicePrice for completed appointments
+    }> = {}
     apptItems.forEach(a => {
       const name = a.resourceName || 'غير محدد'
-      if (!byName[name]) byName[name] = { total: 0, completed: 0, noShow: 0, cancelled: 0 }
+      if (!byName[name]) byName[name] = { total: 0, completed: 0, noShow: 0, cancelled: 0, revenueAED: 0 }
       byName[name].total++
-      if (a.status === 'completed') byName[name].completed++
+      if (a.status === 'completed') {
+        byName[name].completed++
+        byName[name].revenueAED += a.servicePrice ?? 0
+      }
       if (a.status === 'no_show') byName[name].noShow++
       if (a.status === 'cancelled') byName[name].cancelled++
     })
     return byName
   }, [apptItems])
+
+  const totalRevenue = Object.values(empStats).reduce((s, e) => s + e.revenueAED, 0)
 
   // Attendance summary for selected employee
   const attendanceSummary = useMemo(() => {
@@ -759,8 +767,12 @@ function EmployeesTab({ slug, branchId }: { slug: string; branchId: string | nul
             <StatCard icon={Users} label="قابلون للحجز" value={fmtN((employees ?? []).filter(e => e.isBookableForAppointments).length)} color="purple" />
           </div>
 
-          {/* Appointments performance table */}
-          <Card title="أداء الموظفين — المواعيد">
+          {/* Revenue per employee — main table */}
+          <Card title="إيرادات الموظفين — المواعيد المكتملة">
+            <div className="px-4 py-2 border-b border-gray-100 bg-rose-50 flex items-center justify-between">
+              <p className="text-xs text-gray-500">المبلغ = مجموع سعر الخدمة للمواعيد المكتملة (تم الدفع عبر نقطة البيع)</p>
+              <p className="text-sm font-bold text-rose-700">{totalRevenue.toFixed(2)} AED إجمالي</p>
+            </div>
             {Object.keys(empStats).length === 0 ? (
               <p className="text-center text-gray-400 py-10 text-sm">لا توجد بيانات في هذه الفترة</p>
             ) : (
@@ -768,35 +780,71 @@ function EmployeesTab({ slug, branchId }: { slug: string; branchId: string | nul
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="border-b border-gray-100 text-right">
-                      <th className="px-5 py-3 text-xs font-semibold text-gray-500">الموظف</th>
-                      <th className="px-4 py-3 text-xs font-semibold text-gray-500 text-center">الإجمالي</th>
-                      <th className="px-4 py-3 text-xs font-semibold text-gray-500 text-center">مكتملة</th>
-                      <th className="px-4 py-3 text-xs font-semibold text-gray-500 text-center">لم يحضر</th>
-                      <th className="px-4 py-3 text-xs font-semibold text-gray-500 text-center">ملغي</th>
-                      <th className="px-4 py-3 text-xs font-semibold text-gray-500 text-center">معدل الإتمام</th>
+                      <th className="px-4 py-2.5 text-xs font-semibold text-gray-500">الموظف</th>
+                      <th className="px-3 py-2.5 text-xs font-semibold text-gray-500 text-center">مواعيد</th>
+                      <th className="px-3 py-2.5 text-xs font-semibold text-gray-500 text-center">مكتملة</th>
+                      <th className="px-3 py-2.5 text-xs font-semibold text-gray-500 text-center">لم يحضر</th>
+                      <th className="px-3 py-2.5 text-xs font-semibold text-gray-500 text-center">ملغي</th>
+                      <th className="px-3 py-2.5 text-xs font-semibold text-gray-500 text-center">معدل الإتمام</th>
+                      <th className="px-3 py-2.5 text-xs font-semibold text-rose-600 text-center">الإيراد (AED)</th>
+                      <th className="px-3 py-2.5 text-xs font-semibold text-gray-400 text-center">% من الإجمالي</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-50">
-                    {Object.entries(empStats).sort((a, b) => b[1].total - a[1].total).map(([name, s]) => (
-                      <tr key={name} className="hover:bg-gray-50">
-                        <td className="px-5 py-3">
-                          <div className="flex items-center gap-2">
-                            <div className="w-8 h-8 bg-rose-100 rounded-full flex items-center justify-center text-rose-700 text-xs font-bold flex-shrink-0">{name[0]}</div>
-                            <span className="font-medium text-gray-900">{name}</span>
-                          </div>
-                        </td>
-                        <td className="px-4 py-3 text-center font-semibold text-gray-900">{s.total}</td>
-                        <td className="px-4 py-3 text-center text-green-700 font-semibold">{s.completed}</td>
-                        <td className="px-4 py-3 text-center text-red-600 font-semibold">{s.noShow}</td>
-                        <td className="px-4 py-3 text-center text-gray-500 font-semibold">{s.cancelled}</td>
-                        <td className="px-4 py-3 text-center">
-                          <span className={`font-bold text-sm ${s.total > 0 && (s.completed / s.total) >= 0.7 ? 'text-green-600' : 'text-amber-600'}`}>
-                            {s.total > 0 ? `${Math.round((s.completed / s.total) * 100)}%` : '—'}
-                          </span>
-                        </td>
-                      </tr>
-                    ))}
+                    {Object.entries(empStats)
+                      .sort((a, b) => b[1].revenueAED - a[1].revenueAED)
+                      .map(([name, s]) => {
+                        const revPct = totalRevenue > 0 ? (s.revenueAED / totalRevenue) * 100 : 0
+                        const emp = (employees ?? []).find(e => e.fullName === name || e.linkedUsername === name)
+                        return (
+                          <tr key={name} className="hover:bg-gray-50">
+                            <td className="px-4 py-2.5">
+                              <div className="flex items-center gap-2">
+                                <div className="w-7 h-7 rounded-full flex items-center justify-center text-white text-xs font-bold flex-shrink-0"
+                                  style={{ backgroundColor: emp?.appointmentColor ?? '#e40046' }}>
+                                  {name[0]}
+                                </div>
+                                <span className="font-medium text-gray-900 text-sm">{name}</span>
+                              </div>
+                            </td>
+                            <td className="px-3 py-2.5 text-center font-semibold text-gray-700 text-sm">{s.total}</td>
+                            <td className="px-3 py-2.5 text-center text-green-700 font-semibold text-sm">{s.completed}</td>
+                            <td className="px-3 py-2.5 text-center text-red-500 font-semibold text-sm">{s.noShow}</td>
+                            <td className="px-3 py-2.5 text-center text-gray-400 font-semibold text-sm">{s.cancelled}</td>
+                            <td className="px-3 py-2.5 text-center">
+                              <span className={`font-bold text-sm ${s.total > 0 && (s.completed / s.total) >= 0.7 ? 'text-green-600' : 'text-amber-600'}`}>
+                                {s.total > 0 ? `${Math.round((s.completed / s.total) * 100)}%` : '—'}
+                              </span>
+                            </td>
+                            <td className="px-3 py-2.5 text-center">
+                              <span className="font-bold text-rose-700 text-sm">{s.revenueAED.toFixed(2)}</span>
+                            </td>
+                            <td className="px-3 py-2.5 text-center">
+                              <div className="flex items-center gap-1.5">
+                                <div className="flex-1 h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                                  <div className="h-full rounded-full bg-rose-400" style={{ width: `${revPct}%` }} />
+                                </div>
+                                <span className="text-xs text-gray-500 w-8 text-end">{revPct.toFixed(0)}%</span>
+                              </div>
+                            </td>
+                          </tr>
+                        )
+                      })}
                   </tbody>
+                  <tfoot>
+                    <tr className="border-t-2 border-gray-200 bg-rose-50 font-bold">
+                      <td className="px-4 py-2.5 text-sm text-gray-700">الإجمالي</td>
+                      <td className="px-3 py-2.5 text-center text-sm">{apptItems.length}</td>
+                      <td className="px-3 py-2.5 text-center text-green-700 text-sm">{Object.values(empStats).reduce((s, e) => s + e.completed, 0)}</td>
+                      <td className="px-3 py-2.5 text-center text-red-500 text-sm">{Object.values(empStats).reduce((s, e) => s + e.noShow, 0)}</td>
+                      <td className="px-3 py-2.5 text-center text-gray-400 text-sm">{Object.values(empStats).reduce((s, e) => s + e.cancelled, 0)}</td>
+                      <td className="px-3 py-2.5 text-center text-sm">
+                        {apptItems.length > 0 ? `${Math.round((Object.values(empStats).reduce((s, e) => s + e.completed, 0) / apptItems.length) * 100)}%` : '—'}
+                      </td>
+                      <td className="px-3 py-2.5 text-center text-rose-700 text-sm font-bold">{totalRevenue.toFixed(2)}</td>
+                      <td className="px-3 py-2.5 text-center text-sm text-gray-500">100%</td>
+                    </tr>
+                  </tfoot>
                 </table>
               </div>
             )}
