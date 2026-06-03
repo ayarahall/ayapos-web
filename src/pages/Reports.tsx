@@ -9,7 +9,7 @@ import { getDailySummary, getSessions } from '../api/cashier'
 import { getInvoices } from '../api/invoices'
 import { getAppointments } from '../api/appointments'
 import { getExpenses } from '../api/expenses'
-import { listEmployees } from '../api/employees'
+import { listEmployees, getAttendanceHistory, getLeaves } from '../api/employees'
 import { useAuthStore } from '../store/authStore'
 import { useLangStore } from '../store/langStore'
 import Card from '../components/ui/Card'
@@ -646,11 +646,26 @@ function ExpensesTab({ slug }: { slug: string }) {
 
 // ─── Employees tab ────────────────────────────────────────────────────────────
 
+const ATTENDANCE_STATUS_AR: Record<string, string> = {
+  present: 'حاضر', late: 'متأخر', absent: 'غائب', leave: 'إجازة', holiday: 'عطلة',
+}
+const ATTENDANCE_COLOR: Record<string, string> = {
+  present: 'text-green-700 bg-green-50', late: 'text-amber-700 bg-amber-50',
+  absent: 'text-red-700 bg-red-50', leave: 'text-blue-700 bg-blue-50',
+  holiday: 'text-gray-700 bg-gray-100',
+}
+const LEAVE_TYPE_AR: Record<string, string> = {
+  annual: 'سنوية', sick: 'مرضية', emergency: 'طارئة', unpaid: 'بدون راتب',
+  maternity: 'أمومة', other: 'أخرى',
+}
+
 function EmployeesTab({ slug, branchId }: { slug: string; branchId: string | null }) {
   const today = todayInDubaiISO()
   const [preset, setPreset] = useState<RangePreset>('month')
   const [customFrom, setCustomFrom] = useState(today)
   const [customTo, setCustomTo] = useState(today)
+  const [selectedEmpId, setSelectedEmpId] = useState<string | null>(null)
+  const [detailTab, setDetailTab] = useState<'attendance' | 'leaves'>('attendance')
 
   const { dateFrom, dateTo } = useMemo(() => {
     if (preset === 'today') return { dateFrom: today, dateTo: today }
@@ -671,7 +686,22 @@ function EmployeesTab({ slug, branchId }: { slug: string; branchId: string | nul
     enabled: !!branchId,
   })
 
+  // Attendance history for selected employee
+  const { data: attendanceHistory, isLoading: attendanceLoading } = useQuery({
+    queryKey: ['attendance-history', branchId, selectedEmpId, dateFrom, dateTo],
+    queryFn: () => getAttendanceHistory(branchId!, selectedEmpId!, dateFrom, dateTo),
+    enabled: !!branchId && !!selectedEmpId,
+  })
+
+  // Leave records for selected employee
+  const { data: leaveRecords, isLoading: leavesLoading } = useQuery({
+    queryKey: ['leaves', branchId, selectedEmpId],
+    queryFn: () => getLeaves(branchId!, selectedEmpId!),
+    enabled: !!branchId && !!selectedEmpId,
+  })
+
   const apptItems = apptData?.items ?? []
+  const selectedEmp = (employees ?? []).find(e => e.id === selectedEmpId)
 
   const empStats = useMemo(() => {
     const byName: Record<string, { total: number; completed: number; noShow: number; cancelled: number }> = {}
@@ -686,7 +716,24 @@ function EmployeesTab({ slug, branchId }: { slug: string; branchId: string | nul
     return byName
   }, [apptItems])
 
+  // Attendance summary for selected employee
+  const attendanceSummary = useMemo(() => {
+    const records = attendanceHistory ?? []
+    return {
+      present: records.filter(r => r.status === 'present').length,
+      late: records.filter(r => r.status === 'late').length,
+      absent: records.filter(r => r.status === 'absent').length,
+      leave: records.filter(r => r.status === 'leave').length,
+      totalWorkedMin: records.reduce((s, r) => s + (r.workedMinutes ?? 0), 0),
+      totalDeductions: records.reduce((s, r) => s + (r.deductionAmount ?? 0), 0),
+      totalLateMin: records.reduce((s, r) => s + (r.lateMinutes ?? 0), 0),
+    }
+  }, [attendanceHistory])
+
   const isLoading = apptLoading || empLoading
+
+  const fmtTime = (iso?: string) => iso ? new Date(iso).toLocaleTimeString('ar-AE', { hour: '2-digit', minute: '2-digit' }) : '—'
+  const fmtMinutes = (min: number) => `${Math.floor(min / 60)}س ${min % 60}د`
 
   return (
     <div className="space-y-5">
@@ -697,15 +744,18 @@ function EmployeesTab({ slug, branchId }: { slug: string; branchId: string | nul
         <div className="flex justify-center py-12"><Spinner size="lg" className="text-rose-600" /></div>
       ) : (
         <>
-          <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
+          {/* Summary cards */}
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
             <StatCard icon={Users} label="إجمالي الموظفين" value={fmtN(employees?.length ?? 0)} color="blue" />
-            <StatCard icon={Users} label="مواعيد الفترة" value={fmtN(apptItems.length)} color="rose" />
-            <StatCard icon={Users} label="موظفون نشطون" value={fmtN(employees?.filter(e => e.isActive).length ?? 0)} color="green" />
+            <StatCard icon={Users} label="نشطون" value={fmtN((employees ?? []).filter(e => e.isActive).length)} color="green" />
+            <StatCard icon={CalendarCheck} label="مواعيد الفترة" value={fmtN(apptItems.length)} color="rose" />
+            <StatCard icon={Users} label="قابلون للحجز" value={fmtN((employees ?? []).filter(e => e.isBookableForAppointments).length)} color="purple" />
           </div>
 
+          {/* Appointments performance table */}
           <Card title="أداء الموظفين — المواعيد">
             {Object.keys(empStats).length === 0 ? (
-              <p className="text-center text-gray-400 py-12 text-sm">لا توجد بيانات في هذه الفترة</p>
+              <p className="text-center text-gray-400 py-10 text-sm">لا توجد بيانات في هذه الفترة</p>
             ) : (
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
@@ -724,9 +774,7 @@ function EmployeesTab({ slug, branchId }: { slug: string; branchId: string | nul
                       <tr key={name} className="hover:bg-gray-50">
                         <td className="px-5 py-3">
                           <div className="flex items-center gap-2">
-                            <div className="w-8 h-8 bg-rose-100 rounded-full flex items-center justify-center text-rose-700 text-xs font-bold flex-shrink-0">
-                              {name[0]}
-                            </div>
+                            <div className="w-8 h-8 bg-rose-100 rounded-full flex items-center justify-center text-rose-700 text-xs font-bold flex-shrink-0">{name[0]}</div>
                             <span className="font-medium text-gray-900">{name}</span>
                           </div>
                         </td>
@@ -747,26 +795,165 @@ function EmployeesTab({ slug, branchId }: { slug: string; branchId: string | nul
             )}
           </Card>
 
-          {/* Employee list */}
-          {(employees ?? []).length > 0 && (
-            <Card title="قائمة الموظفين">
-              <div className="divide-y divide-gray-50">
+          {/* Employee list with select for detail */}
+          <Card title="تفاصيل الموظف — الدوام والإجازات">
+            <div className="px-5 py-4 border-b border-gray-100">
+              <label className="block text-xs text-gray-500 mb-1.5">اختر موظفاً لعرض تفاصيل دوامه</label>
+              <select
+                value={selectedEmpId ?? ''}
+                onChange={e => { setSelectedEmpId(e.target.value || null); setDetailTab('attendance') }}
+                className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-rose-500"
+              >
+                <option value="">-- اختر موظفاً --</option>
                 {(employees ?? []).map(emp => (
-                  <div key={emp.id} className="flex items-center gap-3 px-5 py-3">
-                    <div className="w-9 h-9 rounded-full flex items-center justify-center text-white text-sm font-bold flex-shrink-0"
-                      style={{ backgroundColor: emp.appointmentColor ?? '#e40046' }}>
-                      {emp.fullName[0]}
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium text-gray-900">{emp.fullName}</p>
-                      <p className="text-xs text-gray-500">{emp.jobTitle ?? emp.employmentType ?? '—'}</p>
-                    </div>
-                    <Badge variant={emp.isActive ? 'green' : 'gray'}>{emp.isActive ? 'نشط' : 'غير نشط'}</Badge>
-                  </div>
+                  <option key={emp.id} value={emp.id}>{emp.fullName}{emp.jobTitle ? ` — ${emp.jobTitle}` : ''}</option>
                 ))}
+              </select>
+            </div>
+
+            {selectedEmp && (
+              <>
+                {/* Employee header */}
+                <div className="px-5 py-4 flex items-center gap-3 border-b border-gray-100 bg-rose-50">
+                  <div className="w-10 h-10 rounded-full flex items-center justify-center text-white text-sm font-bold flex-shrink-0"
+                    style={{ backgroundColor: selectedEmp.appointmentColor ?? '#e40046' }}>
+                    {selectedEmp.fullName[0]}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="font-semibold text-gray-900">{selectedEmp.fullName}</p>
+                    <p className="text-xs text-gray-500">{selectedEmp.jobTitle ?? selectedEmp.employmentType ?? '—'} · {selectedEmp.employeeCode ?? ''}</p>
+                  </div>
+                  <div className="flex gap-4 text-center text-xs">
+                    <div>
+                      <p className="text-gray-400">الراتب الأساسي</p>
+                      <p className="font-bold text-gray-800">{selectedEmp.baseSalary?.toFixed(0) ?? '—'} AED</p>
+                    </div>
+                    <div>
+                      <p className="text-gray-400">تاريخ التوظيف</p>
+                      <p className="font-bold text-gray-800">{selectedEmp.hireDate?.slice(0, 10) ?? '—'}</p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Sub-tabs */}
+                <div className="flex border-b border-gray-100">
+                  {(['attendance', 'leaves'] as const).map(tab => (
+                    <button key={tab} onClick={() => setDetailTab(tab)}
+                      className={`px-5 py-2.5 text-sm font-medium transition-colors border-b-2 -mb-px
+                        ${detailTab === tab ? 'border-rose-600 text-rose-600' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>
+                      {tab === 'attendance' ? 'سجل الدوام' : 'الإجازات والغياب'}
+                    </button>
+                  ))}
+                </div>
+
+                {detailTab === 'attendance' && (
+                  <>
+                    {/* Attendance summary */}
+                    {attendanceLoading ? (
+                      <div className="flex justify-center py-8"><Spinner size="md" className="text-rose-600" /></div>
+                    ) : (
+                      <>
+                        <div className="grid grid-cols-3 md:grid-cols-6 divide-x divide-x-reverse divide-gray-100 border-b border-gray-100">
+                          {[
+                            { label: 'حاضر', value: attendanceSummary.present, cls: 'text-green-700' },
+                            { label: 'متأخر', value: attendanceSummary.late, cls: 'text-amber-600' },
+                            { label: 'غائب', value: attendanceSummary.absent, cls: 'text-red-600' },
+                            { label: 'إجازة', value: attendanceSummary.leave, cls: 'text-blue-600' },
+                            { label: 'ساعات العمل', value: fmtMinutes(attendanceSummary.totalWorkedMin), cls: 'text-gray-800' },
+                            { label: 'الخصومات', value: `${attendanceSummary.totalDeductions.toFixed(2)} AED`, cls: 'text-red-600' },
+                          ].map(({ label, value, cls }) => (
+                            <div key={label} className="px-4 py-3 text-center">
+                              <p className="text-xs text-gray-400">{label}</p>
+                              <p className={`font-bold text-sm mt-0.5 ${cls}`}>{value}</p>
+                            </div>
+                          ))}
+                        </div>
+
+                        <div className="divide-y divide-gray-50 max-h-80 overflow-y-auto">
+                          {(attendanceHistory ?? []).length === 0 ? (
+                            <p className="text-center text-gray-400 py-8 text-sm">لا يوجد سجل دوام في هذه الفترة</p>
+                          ) : (
+                            [...(attendanceHistory ?? [])].sort((a, b) => b.attendanceDate.localeCompare(a.attendanceDate)).map(rec => (
+                              <div key={rec.id} className="flex items-center gap-3 px-5 py-2.5">
+                                <span className="text-xs text-gray-500 w-24 flex-shrink-0">{rec.attendanceDate}</span>
+                                <span className={`text-xs font-semibold px-2 py-0.5 rounded-full flex-shrink-0 ${ATTENDANCE_COLOR[rec.status ?? ''] ?? 'text-gray-600 bg-gray-100'}`}>
+                                  {ATTENDANCE_STATUS_AR[rec.status ?? ''] ?? rec.status ?? '—'}
+                                </span>
+                                <span className="text-xs text-gray-600 flex-shrink-0">
+                                  دخول: {fmtTime(rec.checkInAt)}
+                                </span>
+                                <span className="text-xs text-gray-600 flex-shrink-0">
+                                  خروج: {fmtTime(rec.checkOutAt)}
+                                </span>
+                                {(rec.workedMinutes ?? 0) > 0 && (
+                                  <span className="text-xs text-green-600 flex-shrink-0">{fmtMinutes(rec.workedMinutes!)}</span>
+                                )}
+                                {(rec.lateMinutes ?? 0) > 0 && (
+                                  <span className="text-xs text-amber-600 flex-shrink-0">تأخر {rec.lateMinutes} د</span>
+                                )}
+                                {(rec.deductionAmount ?? 0) > 0 && (
+                                  <span className="text-xs text-red-500 flex-shrink-0">خصم {rec.deductionAmount?.toFixed(2)}</span>
+                                )}
+                              </div>
+                            ))
+                          )}
+                        </div>
+                      </>
+                    )}
+                  </>
+                )}
+
+                {detailTab === 'leaves' && (
+                  <>
+                    {leavesLoading ? (
+                      <div className="flex justify-center py-8"><Spinner size="md" className="text-rose-600" /></div>
+                    ) : (leaveRecords ?? []).length === 0 ? (
+                      <p className="text-center text-gray-400 py-10 text-sm">لا توجد سجلات إجازات</p>
+                    ) : (
+                      <div className="divide-y divide-gray-50 max-h-80 overflow-y-auto">
+                        {[...(leaveRecords ?? [])].sort((a, b) => b.startDate.localeCompare(a.startDate)).map(leave => {
+                          const days = Math.ceil((new Date(leave.endDate).getTime() - new Date(leave.startDate).getTime()) / 86400000) + 1
+                          return (
+                            <div key={leave.id} className="flex items-center gap-3 px-5 py-3">
+                              <div className="flex-1 min-w-0">
+                                <div className="flex items-center gap-2 flex-wrap">
+                                  <span className="text-xs font-semibold text-blue-700 bg-blue-50 px-2 py-0.5 rounded-full">
+                                    {LEAVE_TYPE_AR[leave.leaveType ?? ''] ?? leave.leaveType ?? 'إجازة'}
+                                  </span>
+                                  <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${leave.isPaid ? 'bg-green-50 text-green-700' : 'bg-gray-100 text-gray-600'}`}>
+                                    {leave.isPaid ? 'مدفوعة' : 'بدون راتب'}
+                                  </span>
+                                  <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
+                                    leave.status === 'approved' ? 'bg-green-50 text-green-700' :
+                                    leave.status === 'rejected' ? 'bg-red-50 text-red-600' : 'bg-amber-50 text-amber-600'
+                                  }`}>
+                                    {leave.status === 'approved' ? 'معتمدة' : leave.status === 'rejected' ? 'مرفوضة' : 'بانتظار'}
+                                  </span>
+                                </div>
+                                <p className="text-xs text-gray-500 mt-1">{leave.startDate} — {leave.endDate}</p>
+                                {leave.notes && <p className="text-xs text-gray-400 mt-0.5">{leave.notes}</p>}
+                              </div>
+                              <div className="text-end flex-shrink-0">
+                                <p className="text-sm font-bold text-gray-800">{days}</p>
+                                <p className="text-xs text-gray-400">يوم</p>
+                              </div>
+                            </div>
+                          )
+                        })}
+                      </div>
+                    )}
+                  </>
+                )}
+              </>
+            )}
+
+            {!selectedEmpId && (
+              <div className="flex flex-col items-center justify-center py-12 text-gray-300">
+                <Users size={36} className="mb-2" />
+                <p className="text-sm">اختر موظفاً من القائمة أعلاه</p>
               </div>
-            </Card>
-          )}
+            )}
+          </Card>
         </>
       )}
     </div>
