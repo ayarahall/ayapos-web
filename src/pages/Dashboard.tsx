@@ -179,74 +179,126 @@ function CustomizePanel({
   )
 }
 
-// ─── Sales bar chart helper ───────────────────────────────────────────────────
+// ─── Sales chart widget (bar + line) ─────────────────────────────────────────
 
 type SalesPeriod = 'week' | 'month'
+type ChartType = 'bar' | 'line'
 
 interface SalesBarItem { label: string; cents: number }
 
 function SalesBarChartWidget({ bars, period, onPeriod }: { bars: SalesBarItem[]; period: SalesPeriod; onPeriod: (p: SalesPeriod) => void }) {
   const [tooltip, setTooltip] = useState<{ bar: SalesBarItem; x: number; y: number } | null>(null)
+  const [chartType, setChartType] = useState<ChartType>('bar')
   const maxCents = Math.max(...bars.map(b => b.cents), 1)
-  const chartH = 90
-  const barW = Math.max(20, Math.min(36, Math.floor(480 / (bars.length || 1)) - 8))
-  const gap = Math.max(5, barW * 0.25)
-  const paddingX = 6
-  const svgW = bars.length * (barW + gap) + paddingX * 2 - gap
+  const W = 560; const H = 100; const padX = 8; const padY = 4
+  const step = bars.length > 1 ? (W - padX * 2) / (bars.length - 1) : W - padX * 2
+  const barW = Math.max(8, Math.min(28, Math.floor((W - padX * 2) / (bars.length || 1)) - 4))
   const fmt = (cents: number) => new Intl.NumberFormat('ar-AE', { minimumFractionDigits: 0 }).format(cents / 100)
+  const total = bars.reduce((s, b) => s + b.cents, 0)
+
+  const pts = bars.map((b, i) => {
+    const x = padX + (bars.length > 1 ? i * step : W / 2 - padX)
+    const y = H - padY - Math.max(b.cents > 0 ? 4 : 0, ((b.cents / maxCents) * (H - padY * 2)))
+    return { x, y, bar: b }
+  })
+  const linePath = pts.length > 1 ? `M ${pts.map(p => `${p.x},${p.y}`).join(' L ')}` : ''
+  const areaPath = pts.length > 1
+    ? `M ${pts[0].x},${H - padY} L ${pts.map(p => `${p.x},${p.y}`).join(' L ')} L ${pts[pts.length - 1].x},${H - padY} Z`
+    : ''
 
   return (
-    <div className="px-4 py-3">
-      <div className="flex items-center justify-between mb-3">
-        <p className="text-xs text-gray-500">المبيعات (فواتير مدفوعة)</p>
-        <div className="flex bg-gray-100 rounded-lg p-0.5">
-          {(['week', 'month'] as SalesPeriod[]).map(p => (
-            <button key={p} onClick={() => onPeriod(p)}
-              className={`px-2.5 py-1 rounded-md text-xs font-medium transition-colors
-                ${period === p ? 'bg-white text-rose-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
-              {p === 'week' ? 'أسبوع' : 'شهر'}
-            </button>
-          ))}
+    <div className="px-3 py-2">
+      <div className="flex items-center justify-between mb-2">
+        <div className="flex items-center gap-3">
+          <p className="text-xs text-gray-500">المبيعات المدفوعة</p>
+          <span className="text-xs font-bold text-rose-600">{fmt(total)} AED</span>
+        </div>
+        <div className="flex items-center gap-1.5">
+          {/* Chart type toggle */}
+          <div className="flex bg-gray-100 rounded-md p-0.5">
+            {(['bar', 'line'] as ChartType[]).map(t => (
+              <button key={t} onClick={() => setChartType(t)}
+                className={`px-2 py-0.5 rounded text-xs font-medium transition-colors
+                  ${chartType === t ? 'bg-white text-rose-600 shadow-sm' : 'text-gray-400'}`}>
+                {t === 'bar' ? '▌▌' : '〜'}
+              </button>
+            ))}
+          </div>
+          {/* Period toggle */}
+          <div className="flex bg-gray-100 rounded-md p-0.5">
+            {(['week', 'month'] as SalesPeriod[]).map(p => (
+              <button key={p} onClick={() => onPeriod(p)}
+                className={`px-2 py-0.5 rounded text-xs font-medium transition-colors
+                  ${period === p ? 'bg-white text-rose-600 shadow-sm' : 'text-gray-400'}`}>
+                {p === 'week' ? '7د' : '30د'}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
-      <div className="relative w-full overflow-x-auto">
-        <svg width="100%" viewBox={`0 0 ${svgW} ${chartH + 30}`} className="overflow-visible min-w-[200px]">
+
+      {/* Fixed height container — prevents SVG from stretching */}
+      <div className="relative overflow-x-auto" style={{ height: 120 }}>
+        <svg width={W} height={H + 20} viewBox={`0 0 ${W} ${H + 20}`}
+          style={{ display: 'block', minWidth: W }}>
+          {/* Grid lines */}
           {[0.25, 0.5, 0.75, 1].map(r => (
-            <line key={r} x1={0} y1={chartH * (1 - r)} x2={svgW} y2={chartH * (1 - r)} stroke="#f3f4f6" strokeWidth={1} />
+            <line key={r} x1={padX} y1={H * (1 - r)} x2={W - padX} y2={H * (1 - r)}
+              stroke="#f3f4f6" strokeWidth={1} />
           ))}
-          {bars.map((bar, i) => {
-            const barH = Math.max(bar.cents > 0 ? 3 : 0, (bar.cents / maxCents) * chartH)
-            const x = paddingX + i * (barW + gap)
-            const y = chartH - barH
+
+          {chartType === 'bar' && bars.map((bar, i) => {
+            const bH = Math.max(bar.cents > 0 ? 3 : 0, (bar.cents / maxCents) * (H - padY * 2))
+            const x = padX + i * ((W - padX * 2) / Math.max(bars.length - 1, 1))
+            const xBar = x - barW / 2
             return (
               <g key={bar.label}>
-                <rect x={x} y={y} width={barW} height={barH} rx={3}
-                  fill="#e40046" opacity={0.82}
-                  className="cursor-pointer transition-opacity hover:opacity-100"
-                  onMouseEnter={e => {
-                    const rect = (e.target as SVGRectElement).getBoundingClientRect()
-                    setTooltip({ bar, x: rect.left + rect.width / 2, y: rect.top })
-                  }}
-                  onMouseLeave={() => setTooltip(null)}
-                />
-                <text x={x + barW / 2} y={chartH + 14} textAnchor="middle" fontSize={8} fill="#9ca3af">
-                  {bar.label}
-                </text>
+                <rect x={xBar} y={H - padY - bH} width={barW} height={bH} rx={3}
+                  fill="#e40046" opacity={0.8}
+                  className="cursor-pointer"
+                  onMouseEnter={e => { const r = (e.target as SVGRectElement).getBoundingClientRect(); setTooltip({ bar, x: r.left + r.width / 2, y: r.top }) }}
+                  onMouseLeave={() => setTooltip(null)} />
+                <text x={x} y={H + 14} textAnchor="middle" fontSize={7} fill="#9ca3af">{bar.label}</text>
               </g>
             )
           })}
+
+          {chartType === 'line' && pts.length > 1 && (
+            <>
+              <defs>
+                <linearGradient id="areaGrad" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor="#e40046" stopOpacity="0.18" />
+                  <stop offset="100%" stopColor="#e40046" stopOpacity="0" />
+                </linearGradient>
+              </defs>
+              <path d={areaPath} fill="url(#areaGrad)" />
+              <path d={linePath} fill="none" stroke="#e40046" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" />
+              {pts.map(({ x, y, bar }, i) => (
+                <g key={i}>
+                  <circle cx={x} cy={y} r={3} fill="#e40046"
+                    className="cursor-pointer"
+                    onMouseEnter={e => { const r = (e.target as SVGCircleElement).getBoundingClientRect(); setTooltip({ bar, x: r.left + r.width / 2, y: r.top }) }}
+                    onMouseLeave={() => setTooltip(null)} />
+                  <text x={x} y={H + 14} textAnchor="middle" fontSize={7} fill="#9ca3af">{bar.label}</text>
+                </g>
+              ))}
+            </>
+          )}
+
+          {chartType === 'line' && pts.length === 1 && (
+            <circle cx={pts[0].x} cy={pts[0].y} r={4} fill="#e40046" />
+          )}
         </svg>
-        {tooltip && (
-          <div className="fixed z-50 pointer-events-none bg-gray-900 text-white text-xs rounded-lg px-2.5 py-1.5 shadow-lg"
-            style={{ left: tooltip.x, top: tooltip.y - 36, transform: 'translateX(-50%)' }}>
-            {tooltip.bar.label}: {fmt(tooltip.bar.cents)} AED
-          </div>
-        )}
       </div>
-      <div className="flex items-center justify-between mt-2 text-xs text-gray-500">
-        <span>الإجمالي: <strong className="text-gray-900">{fmt(bars.reduce((s, b) => s + b.cents, 0))} AED</strong></span>
-        <span className="text-gray-400">{bars.filter(b => b.cents > 0).length} يوم بمبيعات</span>
-      </div>
+
+      {tooltip && (
+        <div className="fixed z-50 pointer-events-none bg-gray-900 text-white text-xs rounded-lg px-2 py-1 shadow-lg"
+          style={{ left: tooltip.x, top: tooltip.y - 32, transform: 'translateX(-50%)' }}>
+          {tooltip.bar.label}: {fmt(tooltip.bar.cents)} AED
+        </div>
+      )}
+
+      <p className="text-xs text-gray-400 mt-1 text-end">{bars.filter(b => b.cents > 0).length} يوم نشط من {bars.length}</p>
     </div>
   )
 }
@@ -688,12 +740,12 @@ export default function Dashboard() {
   const isVisible = (id: WidgetId) => widgets.find((w) => w.id === id)?.visible !== false
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-3">
       {/* Header with customize button */}
-      <div className="relative flex items-center justify-between bg-gradient-to-l shadow-lg shadow-rose-100 from-rose-900 to-rose-600 rounded-2xl p-6 text-white">
+      <div className="relative flex items-center justify-between bg-gradient-to-l shadow-md shadow-rose-100 from-rose-900 to-rose-600 rounded-xl px-3 py-2 text-white">
         <div>
-          <h2 className="text-2xl font-bold">{greeting}, {user?.username}</h2>
-          <p className="text-rose-100 mt-1">{formatDate(new Date(), lang)}</p>
+          <h2 className="text-base font-bold">{greeting}, {user?.username}</h2>
+          <p className="text-rose-200 text-xs mt-0.5">{formatDate(new Date(), lang)}</p>
         </div>
         <div className="relative">
           <button
@@ -714,31 +766,31 @@ export default function Dashboard() {
       </div>
 
       {!session && (
-        <div className="flex items-center gap-3 bg-rose-50 border border-rose-200 rounded-xl px-4 py-3 text-slate-800">
-          <AlertCircle size={18} className="flex-shrink-0" />
-          <p className="text-sm font-medium">{t.dashboard.sessionAlert}</p>
+        <div className="flex items-center gap-2 bg-rose-50 border border-rose-200 rounded-lg px-3 py-2 text-slate-800">
+          <AlertCircle size={15} className="flex-shrink-0 text-rose-500" />
+          <p className="text-xs font-medium">{t.dashboard.sessionAlert}</p>
         </div>
       )}
       {session && (
-        <div className="flex items-center gap-3 bg-white border border-rose-100 rounded-xl px-4 py-3 text-slate-800">
-          <div className="w-2 h-2 rounded-full bg-rose-600 animate-pulse" />
-          <p className="text-sm font-medium">{formatTime(session.openedAt, lang)}</p>
+        <div className="flex items-center gap-2 bg-white border border-rose-100 rounded-lg px-3 py-2 text-slate-800">
+          <div className="w-1.5 h-1.5 rounded-full bg-rose-600 animate-pulse" />
+          <p className="text-xs font-medium text-rose-700">جلسة مفتوحة منذ {formatTime(session.openedAt, lang)}</p>
         </div>
       )}
 
       {/* Stats widget */}
       {isVisible('stats') && (
         summaryLoading ? (
-          <div className="flex justify-center py-8"><Spinner size="lg" className="text-rose-600" /></div>
+          <div className="flex justify-center py-6"><Spinner size="md" className="text-rose-600" /></div>
         ) : (
-          <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
+          <div className="grid grid-cols-2 lg:grid-cols-5 gap-2">
             {stats.map(({ label, value, icon: Icon, color, bg }) => (
-              <Card key={label} className="p-5">
-                <div className={`w-10 h-10 ${bg} rounded-xl flex items-center justify-center mb-3`}>
-                  <Icon size={20} className={color} />
+              <Card key={label} className="p-3">
+                <div className={`w-7 h-7 ${bg} rounded-lg flex items-center justify-center mb-2`}>
+                  <Icon size={15} className={color} />
                 </div>
-                <p className="text-gray-500 text-xs mb-1">{label}</p>
-                <p className="text-xl font-bold text-gray-900">{value}</p>
+                <p className="text-gray-500 text-xs leading-tight">{label}</p>
+                <p className="text-base font-bold text-gray-900 mt-0.5 leading-tight">{value}</p>
               </Card>
             ))}
           </div>
@@ -747,12 +799,12 @@ export default function Dashboard() {
 
       {/* Sales chart widget */}
       {isVisible('sales-chart') && (
-        <Card title={salesPeriod === 'week' ? 'مبيعات آخر 7 أيام' : 'مبيعات آخر 30 يوم'} className="lg:col-span-3">
+        <Card title={salesPeriod === 'week' ? 'مبيعات آخر 7 أيام' : 'مبيعات آخر 30 يوم'}>
           <SalesBarChartWidget bars={salesBars} period={salesPeriod} onPeriod={setSalesPeriod} />
         </Card>
       )}
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         {/* Bar chart widget */}
         {isVisible('appt-chart') && (
           <Card title="مواعيد اليوم — رسم بياني">
@@ -785,7 +837,7 @@ export default function Dashboard() {
             ) : (
               <div className="divide-y divide-gray-50">
                 {(invoicesPage?.items ?? []).map((inv) => (
-                  <div key={inv.id} className="flex items-center justify-between px-5 py-3">
+                  <div key={inv.id} className="flex items-center justify-between px-3 py-2">
                     <div>
                       <p className="text-sm font-medium text-gray-900">{inv.invoiceCode}</p>
                       <p className="text-xs text-gray-500">{formatShortDate(inv.createdAt, lang)}</p>
@@ -797,7 +849,7 @@ export default function Dashboard() {
                   </div>
                 ))}
                 {(invoicesPage?.items ?? []).length === 0 && (
-                  <p className="text-center text-gray-400 py-8 text-sm">{lang === 'ar' ? 'لا توجد فواتير' : 'No invoices'}</p>
+                  <p className="text-center text-gray-400 py-5 text-xs">{lang === 'ar' ? 'لا توجد فواتير' : 'No invoices'}</p>
                 )}
               </div>
             )}
@@ -828,7 +880,7 @@ export default function Dashboard() {
                 {openPosDrafts.map((draft) => {
                   const totalCents = draft.items.reduce((sum, item) => sum + item.qty * item.unitPriceCents, 0)
                   return (
-                    <div key={draft.id} className="flex items-start justify-between gap-3 px-5 py-3">
+                    <div key={draft.id} className="flex items-start justify-between gap-3 px-3 py-2">
                       <div className="min-w-0">
                         <p className="truncate text-sm font-semibold text-gray-900">{draft.customerName || draft.label}</p>
                         <p className="mt-0.5 truncate text-xs text-gray-500">{draft.items.length} {lang === 'ar' ? 'بند - لم يتم الدفع بعد' : 'items - unpaid'}</p>
@@ -871,7 +923,7 @@ export default function Dashboard() {
             ) : (
               <div className="divide-y divide-gray-50">
                 {submittedExpenses!.slice(0, 5).map((exp) => (
-                  <div key={exp.id} className="flex items-center justify-between px-5 py-3 gap-3">
+                  <div key={exp.id} className="flex items-center justify-between px-3 py-2 gap-3">
                     <div className="min-w-0 flex-1">
                       <p className="text-sm font-medium text-gray-900 truncate">{exp.title}</p>
                       <p className="text-xs text-gray-500 mt-0.5">{exp.category} · {exp.paymentMethod === 'cash' ? (lang === 'ar' ? 'نقداً' : 'Cash') : exp.paymentMethod}</p>
@@ -882,7 +934,7 @@ export default function Dashboard() {
                     </div>
                   </div>
                 ))}
-                <div className="px-5 py-3 bg-gray-50 border-t border-gray-100 flex items-center justify-between gap-2">
+                <div className="px-3 py-2 bg-gray-50 border-t border-gray-100 flex items-center justify-between gap-2">
                   <span className="inline-flex items-center gap-2 text-xs text-gray-600 font-medium">
                     <Receipt size={14} className="text-rose-500" />
                     {submittedExpenses!.length} {lang === 'ar' ? 'مصروف بانتظار الاعتماد' : 'pending expense(s)'}
@@ -899,7 +951,7 @@ export default function Dashboard() {
           <Card title={t.dashboard.topProducts}>
             <div className="divide-y divide-gray-50">
               {topItems.slice(0, 5).map((item, i) => (
-                <div key={i} className="flex items-center gap-3 px-5 py-3">
+                <div key={i} className="flex items-center gap-3 px-3 py-2">
                   <div className="w-7 h-7 bg-rose-100 rounded-lg flex items-center justify-center">
                     <Package size={14} className="text-rose-600" />
                   </div>
@@ -911,7 +963,7 @@ export default function Dashboard() {
                 </div>
               ))}
               {topItems.length === 0 && (
-                <p className="text-center text-gray-400 py-8 text-sm">{lang === 'ar' ? 'لا توجد مبيعات اليوم' : 'No sales today'}</p>
+                <p className="text-center text-gray-400 py-5 text-xs">{lang === 'ar' ? 'لا توجد مبيعات اليوم' : 'No sales today'}</p>
               )}
             </div>
           </Card>
@@ -922,7 +974,7 @@ export default function Dashboard() {
           <Card title={lang === 'ar' ? 'مهام اليوم' : "Today's Tasks"} className="lg:col-span-3">
             <div className="grid grid-cols-1 md:grid-cols-3 divide-y md:divide-y-0 md:divide-x md:divide-x-reverse divide-gray-50">
               {dailyTasks.map(({ label, detail, done, icon: Icon }) => (
-                <div key={label} className="flex items-start gap-3 px-5 py-3">
+                <div key={label} className="flex items-start gap-3 px-3 py-2">
                   <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${done ? 'bg-white' : 'bg-rose-50'}`}>
                     {done ? <CheckCircle2 size={16} className="text-rose-600" /> : <Icon size={16} className="text-slate-700" />}
                   </div>

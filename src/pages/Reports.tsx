@@ -1001,6 +1001,8 @@ const GROUP_LABELS: Record<string, string> = {
   expense: 'مصاريف',
 }
 
+type ReportMode = 'flat' | 'pivot'
+
 function CustomReportBuilder({ slug, branchId }: { slug: string; branchId: string | null }) {
   const today = todayInDubaiISO()
   const [selectedFields, setSelectedFields] = useState<ReportField[]>([])
@@ -1008,6 +1010,10 @@ function CustomReportBuilder({ slug, branchId }: { slug: string; branchId: strin
   const [draggingId, setDraggingId] = useState<string | null>(null)
   const [draggingSelected, setDraggingSelected] = useState(false)
   const [showPreview, setShowPreview] = useState(false)
+  const [reportMode, setReportMode] = useState<ReportMode>('flat')
+  const [pivotRow, setPivotRow] = useState<string>('')
+  const [pivotCol, setPivotCol] = useState<string>('')
+  const [pivotVal, setPivotVal] = useState<string>('')
   const [preset, setPreset] = useState<RangePreset>('month')
   const [customFrom, setCustomFrom] = useState(today)
   const [customTo, setCustomTo] = useState(today)
@@ -1216,24 +1222,56 @@ function CustomReportBuilder({ slug, branchId }: { slug: string; branchId: strin
           )}
 
           {selectedFields.length > 0 && (
-            <button
-              onClick={() => setShowPreview(true)}
-              className="mt-4 w-full flex items-center justify-center gap-2 bg-rose-600 text-white py-2 rounded-lg text-sm font-medium hover:bg-rose-700 transition-colors"
-            >
-              <Eye size={15} />
-              عرض التقرير ({selectedFields.length} أعمدة)
-            </button>
+            <div className="mt-4 space-y-2">
+              {/* Mode toggle */}
+              <div className="flex bg-gray-100 rounded-lg p-0.5">
+                {(['flat', 'pivot'] as ReportMode[]).map(m => (
+                  <button key={m} onClick={() => setReportMode(m)}
+                    className={`flex-1 py-1.5 rounded-md text-xs font-medium transition-colors
+                      ${reportMode === m ? 'bg-white text-rose-600 shadow-sm' : 'text-gray-500'}`}>
+                    {m === 'flat' ? '☰ جدول عادي' : '⊞ جدول محوري (Pivot)'}
+                  </button>
+                ))}
+              </div>
+
+              {/* Pivot config */}
+              {reportMode === 'pivot' && (
+                <div className="grid grid-cols-3 gap-2 bg-rose-50 border border-rose-100 rounded-lg p-3">
+                  {[
+                    { label: 'الصفوف (Row)', val: pivotRow, set: setPivotRow },
+                    { label: 'الأعمدة (Col)', val: pivotCol, set: setPivotCol },
+                    { label: 'القيمة (Value)', val: pivotVal, set: setPivotVal },
+                  ].map(({ label, val, set }) => (
+                    <div key={label}>
+                      <p className="text-xs text-rose-600 mb-1 font-medium">{label}</p>
+                      <select value={val} onChange={e => set(e.target.value)}
+                        className="w-full text-xs border border-rose-200 rounded-md px-2 py-1.5 bg-white focus:outline-none focus:ring-1 focus:ring-rose-400">
+                        <option value="">-- اختر --</option>
+                        {selectedFields.map(f => <option key={f.id} value={f.id}>{f.label}</option>)}
+                      </select>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              <button
+                onClick={() => setShowPreview(true)}
+                className="w-full flex items-center justify-center gap-2 bg-rose-600 text-white py-2 rounded-lg text-sm font-medium hover:bg-rose-700 transition-colors"
+              >
+                <Eye size={15} />
+                {reportMode === 'pivot' ? 'عرض Pivot Table' : `عرض التقرير (${selectedFields.length} أعمدة)`}
+              </button>
+            </div>
           )}
         </div>
       </div>
 
-      {/* Preview table */}
-      {showPreview && selectedFields.length > 0 && (
-        <Card title={`معاينة التقرير — ${previewRows.length} صف`}>
-          <div className="flex items-center justify-between px-5 py-3 border-b border-gray-100">
-            <p className="text-sm text-gray-500">الفترة: {dateFrom} — {dateTo}</p>
-            <button onClick={() => setShowPreview(false)}
-              className="text-xs text-gray-500 hover:text-red-600 flex items-center gap-1">
+      {/* Preview — Flat Table */}
+      {showPreview && reportMode === 'flat' && selectedFields.length > 0 && (
+        <Card title={`جدول عادي — ${previewRows.length} صف`}>
+          <div className="flex items-center justify-between px-4 py-2.5 border-b border-gray-100">
+            <p className="text-xs text-gray-500">الفترة: {dateFrom} — {dateTo}</p>
+            <button onClick={() => setShowPreview(false)} className="text-xs text-gray-400 hover:text-red-600 flex items-center gap-1">
               <X size={13} /> إغلاق
             </button>
           </div>
@@ -1242,9 +1280,9 @@ function CustomReportBuilder({ slug, branchId }: { slug: string; branchId: strin
               <thead>
                 <tr className="border-b border-gray-100 text-right">
                   {selectedFields.map(f => (
-                    <th key={f.id} className="px-4 py-3 text-xs font-semibold text-gray-500 whitespace-nowrap">
+                    <th key={f.id} className="px-3 py-2.5 text-xs font-semibold text-gray-500 whitespace-nowrap">
                       {f.label}
-                      <span className="ms-1 text-gray-300 font-normal text-xs">({GROUP_LABELS[f.group]})</span>
+                      <span className="ms-1 text-gray-300 text-xs">({GROUP_LABELS[f.group]})</span>
                     </th>
                   ))}
                 </tr>
@@ -1253,29 +1291,106 @@ function CustomReportBuilder({ slug, branchId }: { slug: string; branchId: strin
                 {previewRows.slice(0, 50).map((row, i) => (
                   <tr key={i} className="hover:bg-gray-50">
                     {selectedFields.map(f => (
-                      <td key={f.id} className="px-4 py-2.5 text-gray-700 whitespace-nowrap">
+                      <td key={f.id} className="px-3 py-2 text-gray-700 whitespace-nowrap text-xs">
                         {formatCellValue(row[f.id], f)}
                       </td>
                     ))}
                   </tr>
                 ))}
                 {previewRows.length === 0 && (
-                  <tr>
-                    <td colSpan={selectedFields.length} className="text-center py-12 text-gray-400">
-                      لا توجد بيانات في هذه الفترة
-                    </td>
-                  </tr>
+                  <tr><td colSpan={selectedFields.length} className="text-center py-10 text-gray-400 text-sm">لا توجد بيانات</td></tr>
                 )}
               </tbody>
             </table>
             {previewRows.length > 50 && (
-              <p className="text-center text-xs text-gray-400 py-3 border-t border-gray-100">
-                يُعرض أول 50 صف من {previewRows.length}
-              </p>
+              <p className="text-center text-xs text-gray-400 py-2 border-t border-gray-100">يُعرض أول 50 من {previewRows.length}</p>
             )}
           </div>
         </Card>
       )}
+
+      {/* Preview — Pivot Table */}
+      {showPreview && reportMode === 'pivot' && selectedFields.length > 0 && pivotRow && pivotCol && pivotVal && (() => {
+        const rowField = selectedFields.find(f => f.id === pivotRow)
+        const colField = selectedFields.find(f => f.id === pivotCol)
+        const valField = selectedFields.find(f => f.id === pivotVal)
+        if (!rowField || !colField || !valField) return null
+
+        const rowValues = [...new Set(previewRows.map(r => String(r[pivotRow] ?? '—')))].sort()
+        const colValues = [...new Set(previewRows.map(r => String(r[pivotCol] ?? '—')))].sort()
+
+        const cell = (row: string, col: string) => {
+          const matching = previewRows.filter(r => String(r[pivotRow] ?? '—') === row && String(r[pivotCol] ?? '—') === col)
+          if (matching.length === 0) return '—'
+          const vals = matching.map(r => parseFloat(String(r[pivotVal] ?? '0')) || 0)
+          const isNumeric = valField.key === 'total' || valField.key === 'amount' || valField.key === 'servicePrice'
+          if (isNumeric) return vals.reduce((a, b) => a + b, 0).toFixed(2)
+          return String(matching.length)
+        }
+
+        const rowTotal = (row: string) => {
+          const matching = previewRows.filter(r => String(r[pivotRow] ?? '—') === row)
+          const isNumeric = valField.key === 'total' || valField.key === 'amount' || valField.key === 'servicePrice'
+          if (isNumeric) return matching.reduce((s, r) => s + (parseFloat(String(r[pivotVal] ?? '0')) || 0), 0).toFixed(2)
+          return String(matching.length)
+        }
+
+        return (
+          <Card title={`Pivot Table — ${rowField.label} × ${colField.label}`}>
+            <div className="flex items-center justify-between px-4 py-2.5 border-b border-gray-100">
+              <p className="text-xs text-gray-500">القيمة: {valField.label} · {previewRows.length} صف</p>
+              <button onClick={() => setShowPreview(false)} className="text-xs text-gray-400 hover:text-red-600 flex items-center gap-1">
+                <X size={13} /> إغلاق
+              </button>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="border-b border-gray-100 bg-gray-50">
+                    <th className="px-3 py-2 text-right font-semibold text-gray-600 whitespace-nowrap">{rowField.label} \ {colField.label}</th>
+                    {colValues.map(col => (
+                      <th key={col} className="px-3 py-2 text-center font-semibold text-gray-600 whitespace-nowrap">{col}</th>
+                    ))}
+                    <th className="px-3 py-2 text-center font-bold text-rose-600 whitespace-nowrap bg-rose-50">الإجمالي</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-50">
+                  {rowValues.map(row => (
+                    <tr key={row} className="hover:bg-gray-50">
+                      <td className="px-3 py-2 font-semibold text-gray-800 whitespace-nowrap">{row}</td>
+                      {colValues.map(col => (
+                        <td key={col} className="px-3 py-2 text-center text-gray-700">{cell(row, col)}</td>
+                      ))}
+                      <td className="px-3 py-2 text-center font-bold text-rose-600 bg-rose-50">{rowTotal(row)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+                <tfoot>
+                  <tr className="border-t-2 border-gray-200 bg-gray-50 font-bold">
+                    <td className="px-3 py-2 text-gray-700">الإجمالي</td>
+                    {colValues.map(col => {
+                      const matching = previewRows.filter(r => String(r[pivotCol] ?? '—') === col)
+                      const isNumeric = valField.key === 'total' || valField.key === 'amount' || valField.key === 'servicePrice'
+                      const total = isNumeric
+                        ? matching.reduce((s, r) => s + (parseFloat(String(r[pivotVal] ?? '0')) || 0), 0).toFixed(2)
+                        : String(matching.length)
+                      return <td key={col} className="px-3 py-2 text-center text-gray-800">{total}</td>
+                    })}
+                    <td className="px-3 py-2 text-center text-rose-700 bg-rose-50">
+                      {(() => {
+                        const isNumeric = valField.key === 'total' || valField.key === 'amount' || valField.key === 'servicePrice'
+                        return isNumeric
+                          ? previewRows.reduce((s, r) => s + (parseFloat(String(r[pivotVal] ?? '0')) || 0), 0).toFixed(2)
+                          : String(previewRows.length)
+                      })()}
+                    </td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+          </Card>
+        )
+      })()}
     </div>
   )
 }
