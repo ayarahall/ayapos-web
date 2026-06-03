@@ -187,118 +187,135 @@ type ChartType = 'bar' | 'line'
 interface SalesBarItem { label: string; cents: number }
 
 function SalesBarChartWidget({ bars, period, onPeriod }: { bars: SalesBarItem[]; period: SalesPeriod; onPeriod: (p: SalesPeriod) => void }) {
-  const [tooltip, setTooltip] = useState<{ bar: SalesBarItem; x: number; y: number } | null>(null)
+  const [hoveredIdx, setHoveredIdx] = useState<number | null>(null)
   const [chartType, setChartType] = useState<ChartType>('bar')
   const maxCents = Math.max(...bars.map(b => b.cents), 1)
-  const W = 560; const H = 100; const padX = 8; const padY = 4
-  const step = bars.length > 1 ? (W - padX * 2) / (bars.length - 1) : W - padX * 2
-  const barW = Math.max(8, Math.min(28, Math.floor((W - padX * 2) / (bars.length || 1)) - 4))
+  const CHART_H = 80   // fixed chart area height px
+  const LABEL_H = 18   // space for labels below
   const fmt = (cents: number) => new Intl.NumberFormat('ar-AE', { minimumFractionDigits: 0 }).format(cents / 100)
   const total = bars.reduce((s, b) => s + b.cents, 0)
-
-  const pts = bars.map((b, i) => {
-    const x = padX + (bars.length > 1 ? i * step : W / 2 - padX)
-    const y = H - padY - Math.max(b.cents > 0 ? 4 : 0, ((b.cents / maxCents) * (H - padY * 2)))
-    return { x, y, bar: b }
-  })
-  const linePath = pts.length > 1 ? `M ${pts.map(p => `${p.x},${p.y}`).join(' L ')}` : ''
-  const areaPath = pts.length > 1
-    ? `M ${pts[0].x},${H - padY} L ${pts.map(p => `${p.x},${p.y}`).join(' L ')} L ${pts[pts.length - 1].x},${H - padY} Z`
-    : ''
+  const n = bars.length || 1
 
   return (
     <div className="px-3 py-2">
+      {/* Header row */}
       <div className="flex items-center justify-between mb-2">
-        <div className="flex items-center gap-3">
-          <p className="text-xs text-gray-500">المبيعات المدفوعة</p>
-          <span className="text-xs font-bold text-rose-600">{fmt(total)} AED</span>
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-gray-500">المبيعات المدفوعة</span>
+          <span className="text-sm font-bold text-rose-600">{fmt(total)} AED</span>
+          <span className="text-xs text-gray-400">({bars.filter(b => b.cents > 0).length}/{bars.length} يوم)</span>
         </div>
-        <div className="flex items-center gap-1.5">
-          {/* Chart type toggle */}
-          <div className="flex bg-gray-100 rounded-md p-0.5">
+        <div className="flex items-center gap-1">
+          <div className="flex bg-gray-100 rounded p-0.5">
             {(['bar', 'line'] as ChartType[]).map(t => (
               <button key={t} onClick={() => setChartType(t)}
-                className={`px-2 py-0.5 rounded text-xs font-medium transition-colors
+                title={t === 'bar' ? 'أعمدة' : 'خط'}
+                className={`px-2 py-0.5 rounded text-xs font-bold transition-colors
                   ${chartType === t ? 'bg-white text-rose-600 shadow-sm' : 'text-gray-400'}`}>
-                {t === 'bar' ? '▌▌' : '〜'}
+                {t === 'bar' ? '▌▌' : '∿'}
               </button>
             ))}
           </div>
-          {/* Period toggle */}
-          <div className="flex bg-gray-100 rounded-md p-0.5">
+          <div className="flex bg-gray-100 rounded p-0.5">
             {(['week', 'month'] as SalesPeriod[]).map(p => (
               <button key={p} onClick={() => onPeriod(p)}
                 className={`px-2 py-0.5 rounded text-xs font-medium transition-colors
                   ${period === p ? 'bg-white text-rose-600 shadow-sm' : 'text-gray-400'}`}>
-                {p === 'week' ? '7د' : '30د'}
+                {p === 'week' ? '7' : '30'}
               </button>
             ))}
           </div>
         </div>
       </div>
 
-      {/* Fixed height container — prevents SVG from stretching */}
-      <div className="relative overflow-x-auto" style={{ height: 120 }}>
-        <svg width={W} height={H + 20} viewBox={`0 0 ${W} ${H + 20}`}
-          style={{ display: 'block', minWidth: W }}>
-          {/* Grid lines */}
-          {[0.25, 0.5, 0.75, 1].map(r => (
-            <line key={r} x1={padX} y1={H * (1 - r)} x2={W - padX} y2={H * (1 - r)}
-              stroke="#f3f4f6" strokeWidth={1} />
-          ))}
+      {/* Chart — uses CSS flex so it naturally fits the container width */}
+      <div style={{ height: CHART_H + LABEL_H }} className="relative w-full">
+        {chartType === 'bar' && (
+          <div className="absolute inset-0 flex items-end gap-px" style={{ paddingBottom: LABEL_H }}>
+            {/* Y-axis grid lines (overlay) */}
+            <div className="absolute inset-0 flex flex-col justify-between pointer-events-none" style={{ bottom: LABEL_H }}>
+              {[1, 0.75, 0.5, 0.25].map(r => (
+                <div key={r} className="border-t border-gray-100 w-full" />
+              ))}
+              <div className="border-t border-gray-200 w-full" />
+            </div>
 
-          {chartType === 'bar' && bars.map((bar, i) => {
-            const bH = Math.max(bar.cents > 0 ? 3 : 0, (bar.cents / maxCents) * (H - padY * 2))
-            const x = padX + i * ((W - padX * 2) / Math.max(bars.length - 1, 1))
-            const xBar = x - barW / 2
-            return (
-              <g key={bar.label}>
-                <rect x={xBar} y={H - padY - bH} width={barW} height={bH} rx={3}
-                  fill="#e40046" opacity={0.8}
-                  className="cursor-pointer"
-                  onMouseEnter={e => { const r = (e.target as SVGRectElement).getBoundingClientRect(); setTooltip({ bar, x: r.left + r.width / 2, y: r.top }) }}
-                  onMouseLeave={() => setTooltip(null)} />
-                <text x={x} y={H + 14} textAnchor="middle" fontSize={7} fill="#9ca3af">{bar.label}</text>
-              </g>
-            )
-          })}
+            {bars.map((bar, i) => {
+              const pct = maxCents > 0 ? (bar.cents / maxCents) * 100 : 0
+              const isHovered = hoveredIdx === i
+              return (
+                <div key={i} className="flex-1 flex flex-col items-center justify-end relative"
+                  style={{ height: '100%' }}
+                  onMouseEnter={() => setHoveredIdx(i)}
+                  onMouseLeave={() => setHoveredIdx(null)}>
+                  {/* Value label on hover */}
+                  {isHovered && bar.cents > 0 && (
+                    <div className="absolute bottom-full mb-1 bg-gray-900 text-white text-xs rounded px-1.5 py-0.5 whitespace-nowrap z-10"
+                      style={{ fontSize: 10 }}>
+                      {fmt(bar.cents)}
+                    </div>
+                  )}
+                  {/* Bar */}
+                  <div
+                    className="w-full rounded-t transition-all duration-150"
+                    style={{
+                      height: bar.cents > 0 ? `${Math.max(3, pct)}%` : '2px',
+                      backgroundColor: bar.cents > 0
+                        ? (isHovered ? '#be0038' : '#e40046')
+                        : '#f3f4f6',
+                      opacity: bar.cents > 0 ? (isHovered ? 1 : 0.85) : 1,
+                    }}
+                  />
+                  {/* Day label */}
+                  <div className="absolute w-full text-center"
+                    style={{ bottom: -LABEL_H, fontSize: 8, color: '#9ca3af', lineHeight: `${LABEL_H}px` }}>
+                    {bar.label}
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        )}
 
-          {chartType === 'line' && pts.length > 1 && (
-            <>
+        {chartType === 'line' && (() => {
+          const W = 100; const H = 100
+          const pts = bars.map((b, i) => ({
+            x: n > 1 ? (i / (n - 1)) * W : W / 2,
+            y: H - Math.max(b.cents > 0 ? 8 : 2, (b.cents / maxCents) * (H - 10)),
+            bar: b, i,
+          }))
+          const path = pts.length > 1 ? pts.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x} ${p.y}`).join(' ') : ''
+          const area = pts.length > 1 ? `M ${pts[0].x} ${H} ${path.slice(1)} L ${pts[pts.length - 1].x} ${H} Z` : ''
+          return (
+            <svg viewBox={`0 ${-5} ${W} ${H + LABEL_H / 2 + 5}`} preserveAspectRatio="none"
+              className="absolute inset-0 w-full" style={{ height: CHART_H + LABEL_H }}>
               <defs>
-                <linearGradient id="areaGrad" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%" stopColor="#e40046" stopOpacity="0.18" />
+                <linearGradient id="lg2" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor="#e40046" stopOpacity="0.2" />
                   <stop offset="100%" stopColor="#e40046" stopOpacity="0" />
                 </linearGradient>
               </defs>
-              <path d={areaPath} fill="url(#areaGrad)" />
-              <path d={linePath} fill="none" stroke="#e40046" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" />
-              {pts.map(({ x, y, bar }, i) => (
-                <g key={i}>
-                  <circle cx={x} cy={y} r={3} fill="#e40046"
-                    className="cursor-pointer"
-                    onMouseEnter={e => { const r = (e.target as SVGCircleElement).getBoundingClientRect(); setTooltip({ bar, x: r.left + r.width / 2, y: r.top }) }}
-                    onMouseLeave={() => setTooltip(null)} />
-                  <text x={x} y={H + 14} textAnchor="middle" fontSize={7} fill="#9ca3af">{bar.label}</text>
+              {[0.25, 0.5, 0.75].map(r => (
+                <line key={r} x1={0} y1={H * (1 - r)} x2={W} y2={H * (1 - r)} stroke="#f3f4f6" strokeWidth={0.5} />
+              ))}
+              {area && <path d={area} fill="url(#lg2)" />}
+              {path && <path d={path} fill="none" stroke="#e40046" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" vectorEffect="non-scaling-stroke" />}
+              {pts.map(({ x, y, bar, i: idx }) => (
+                <g key={idx}>
+                  <circle cx={x} cy={y} r={2.5} fill="#e40046" vectorEffect="non-scaling-stroke"
+                    onMouseEnter={() => setHoveredIdx(idx)} onMouseLeave={() => setHoveredIdx(null)} />
+                  {hoveredIdx === idx && (
+                    <text x={x} y={y - 5} textAnchor="middle" fontSize={5} fill="#111" fontWeight="bold">
+                      {fmt(bar.cents)}
+                    </text>
+                  )}
+                  <text x={x} y={H + 10} textAnchor="middle" fontSize={5} fill="#9ca3af">{bar.label}</text>
                 </g>
               ))}
-            </>
-          )}
-
-          {chartType === 'line' && pts.length === 1 && (
-            <circle cx={pts[0].x} cy={pts[0].y} r={4} fill="#e40046" />
-          )}
-        </svg>
+            </svg>
+          )
+        })()}
       </div>
-
-      {tooltip && (
-        <div className="fixed z-50 pointer-events-none bg-gray-900 text-white text-xs rounded-lg px-2 py-1 shadow-lg"
-          style={{ left: tooltip.x, top: tooltip.y - 32, transform: 'translateX(-50%)' }}>
-          {tooltip.bar.label}: {fmt(tooltip.bar.cents)} AED
-        </div>
-      )}
-
-      <p className="text-xs text-gray-400 mt-1 text-end">{bars.filter(b => b.cents > 0).length} يوم نشط من {bars.length}</p>
     </div>
   )
 }
