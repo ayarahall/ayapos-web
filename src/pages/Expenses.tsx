@@ -123,7 +123,7 @@ export default function Expenses() {
       })
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['expenses', slug, branchId ?? 'login-branch'] })
+      qc.invalidateQueries({ queryKey: ['expenses', slug] })
       setModalOpen(false)
     },
   })
@@ -131,7 +131,7 @@ export default function Expenses() {
   const statusMut = useMutation({
     mutationFn: () => updateExpenseStatus(slug, statusModalItem!.id, newStatus),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['expenses', slug, branchId ?? 'login-branch'] })
+      qc.invalidateQueries({ queryKey: ['expenses', slug] })
       setStatusModalItem(null)
     },
   })
@@ -139,21 +139,21 @@ export default function Expenses() {
   const submitMut = useMutation({
     mutationFn: (expenseId: string) => updateExpenseStatus(slug, expenseId, 'submitted'),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['expenses', slug, branchId ?? 'login-branch'] })
+      qc.invalidateQueries({ queryKey: ['expenses', slug] })
     },
   })
 
   const approveMut = useMutation({
     mutationFn: (expenseId: string) => updateExpenseStatus(slug, expenseId, 'approved'),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['expenses', slug, branchId ?? 'login-branch'] })
+      qc.invalidateQueries({ queryKey: ['expenses', slug] })
     },
   })
 
   const rejectMut = useMutation({
     mutationFn: (expenseId: string) => updateExpenseStatus(slug, expenseId, 'cancelled'),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['expenses', slug, branchId ?? 'login-branch'] })
+      qc.invalidateQueries({ queryKey: ['expenses', slug] })
     },
   })
 

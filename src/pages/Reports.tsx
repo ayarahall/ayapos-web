@@ -662,7 +662,7 @@ function ExpensesTab({ slug }: { slug: string }) {
   }, [preset, customFrom, customTo, today])
 
   const { data, isLoading } = useQuery({
-    queryKey: ['expenses-report', slug, dateFrom, dateTo],
+    queryKey: ['expenses', slug, 'report', dateFrom, dateTo],
     queryFn: () => getExpenses(slug, { page: 1, pageSize: 1000 }),
     enabled: !!slug,
     staleTime: 0,
@@ -1691,7 +1691,7 @@ function RevenueTab({ slug, branchId }: { slug: string; branchId: string | null 
 
   // Expenses
   const { data: expData, isLoading: expLoading } = useQuery({
-    queryKey: ['pl-expenses', slug],
+    queryKey: ['expenses', slug, 'pl'],
     queryFn: () => getExpenses(slug, { page: 1, pageSize: 1000 }),
     enabled: !!slug,
     staleTime: 0,
