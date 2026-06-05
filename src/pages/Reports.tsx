@@ -1876,15 +1876,18 @@ function ServiceDiscountTab({ slug, branchId }: { slug: string; branchId: string
   })
 
   const detailsLoading = invoiceDetailsQueries.some(q => q.isLoading)
-  const allDetails = invoiceDetailsQueries.map(q => q.data).filter(Boolean)
+
+  // Stable key — only recompute when data actually changes
+  const detailsKey = invoiceDetailsQueries.map(q => q.dataUpdatedAt ?? 0).join(',')
 
   // Actual prices from invoice lines — group by service name
   const actualByService = useMemo(() => {
     const map: Record<string, { qty: number; totalPaid: number; unitPrices: number[] }> = {}
-    allDetails.forEach(detail => {
+    invoiceDetailsQueries.forEach(q => {
+      const detail = q.data
       if (!detail) return
-      const lines = detail.lines ?? detail.items ?? []
-      lines.filter(l => l.itemType === 'Service').forEach(line => {
+      const lines = (detail as any).lines ?? (detail as any).items ?? []
+      ;(lines as any[]).filter((l: any) => l.itemType === 'Service').forEach((line: any) => {
         const name = line.nameSnapshot ?? line.name ?? 'غير محدد'
         if (!map[name]) map[name] = { qty: 0, totalPaid: 0, unitPrices: [] }
         const qty = line.qty ?? 1
@@ -1896,7 +1899,8 @@ function ServiceDiscountTab({ slug, branchId }: { slug: string; branchId: string
       })
     })
     return map
-  }, [allDetails])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [detailsKey])
 
   // Catalog prices from appointments
   const { data: apptData, isLoading: apptLoading } = useQuery({
