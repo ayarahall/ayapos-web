@@ -1,5 +1,5 @@
 import { useState, useMemo, useCallback, useRef } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueries } from '@tanstack/react-query'
 import {
   BarChart3, TrendingUp, DollarSign, CreditCard, ShoppingBag,
   Building2, CalendarCheck, ChevronLeft, ChevronRight,
@@ -210,7 +210,7 @@ function SalesTab({ slug, branchId }: { slug: string; branchId: string | null })
 
   const { data: invoicesData, isLoading: invoicesLoading } = useQuery({
     queryKey: ['invoices-report', slug, branchId ?? 'lb', dateFrom, dateTo],
-    queryFn: () => getInvoices(slug, { page: 1, pageSize: 300, dateFrom, dateTo }),
+    queryFn: () => getInvoices(slug, { page: 1, pageSize: 500 }),
     enabled: !!slug && !isToday,
   })
 
@@ -227,7 +227,11 @@ function SalesTab({ slug, branchId }: { slug: string; branchId: string | null })
     enabled: !!slug,
   })
 
-  const invoiceItems = invoicesData?.items ?? []
+  const invoiceItems = useMemo(() =>
+    (invoicesData?.items ?? []).filter(i => {
+      const d = i.createdAt.slice(0, 10)
+      return d >= dateFrom && d <= dateTo
+    }), [invoicesData, dateFrom, dateTo])
 
   // Aggregate payment methods from today's sessions
   const todayPayments = useMemo(() => {
@@ -258,8 +262,8 @@ function SalesTab({ slug, branchId }: { slug: string; branchId: string | null })
         recentPayments: summary.recentPayments ?? [],
       }
     }
-    const paid = invoiceItems.filter(i => i.status === 'Paid')
-    const totalSalesCents = Math.round(paid.reduce((s, i) => s + i.total * 100, 0))
+    const paid = invoiceItems.filter(i => i.status === 'Paid' || i.status === 'PartiallyPaid')
+    const totalSalesCents = Math.round(paid.reduce((s, i) => s + (i.totalPaid ?? i.total) * 100, 0))
     return {
       totalInvoices: invoiceItems.length,
       paidInvoices: paid.length,
@@ -280,7 +284,7 @@ function SalesTab({ slug, branchId }: { slug: string; branchId: string | null })
     }
     const days = dateRange(dateFrom, dateTo)
     const byDay: Record<string, number> = {}
-    invoiceItems.filter(i => i.status === 'Paid').forEach(inv => {
+    invoiceItems.filter(i => i.status === 'Paid' || i.status === 'PartiallyPaid').forEach(inv => {
       const day = inv.createdAt.slice(0, 10)
       byDay[day] = (byDay[day] ?? 0) + Math.round(inv.total * 100)
     })
@@ -735,7 +739,7 @@ function EmployeesTab({ slug, branchId }: { slug: string; branchId: string | nul
   // Invoices are the only revenue source for employee reports.
   const { data: invoicesForEmp } = useQuery({
     queryKey: ['invoices-emp-report', slug, dateFrom, dateTo],
-    queryFn: () => getInvoices(slug, { page: 1, pageSize: 500, dateFrom, dateTo }),
+    queryFn: () => getInvoices(slug, { page: 1, pageSize: 500 }),
     enabled: !!slug,
   })
 
@@ -819,7 +823,7 @@ function EmployeesTab({ slug, branchId }: { slug: string; branchId: string | nul
           <Card title="إيرادات الموظفين — المواعيد المُنجزة">
             <div className="px-4 py-2 border-b border-gray-100 bg-rose-50 flex items-center justify-between flex-wrap gap-2">
               <p className="text-xs text-gray-500">
-                الإيراد = سعر الخدمة من المواعيد التي تم فيها الحضور أو الإنجاز (checked_in + completed)
+                الإيراد = المبلغ المحصّل فعلياً من الفواتير المدفوعة المرتبطة بالمواعيد
               </p>
               <p className="text-sm font-bold text-rose-700">{totalRevenue.toFixed(2)} AED</p>
             </div>
@@ -857,7 +861,7 @@ function EmployeesTab({ slug, branchId }: { slug: string; branchId: string | nul
                                 <div>
                                   <span className="font-medium text-gray-900 text-sm">{name}</span>
                                   {s.revenueAED === 0 && s.paidCount > 0 && (
-                                    <p className="text-xs text-amber-600">⚠️ سعر الخدمة = 0 في النظام</p>
+                                    <p className="text-xs text-amber-600">⚠️ مبلغ الفاتورة = 0</p>
                                   )}
                                 </div>
                               </div>
@@ -871,7 +875,7 @@ function EmployeesTab({ slug, branchId }: { slug: string; branchId: string | nul
                               {s.revenueAED > 0
                                 ? <span className="font-bold text-rose-700">{s.revenueAED.toFixed(2)}</span>
                                 : <span className="text-xs text-amber-600 font-medium">
-                                    {s.paidCount > 0 ? `${s.paidCount} موعد — سعر 0` : '—'}
+                                    {s.paidCount > 0 ? `${s.paidCount} فاتورة — مبلغ 0` : '—'}
                                   </span>
                               }
                             </td>
@@ -907,8 +911,8 @@ function EmployeesTab({ slug, branchId }: { slug: string; branchId: string | nul
           {/* Warning if some employees have paid appointments with 0 price */}
           {Object.values(empStats).some(e => e.paidCount > 0 && e.revenueAED === 0) && (
             <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 text-xs text-amber-700">
-              <p className="font-semibold mb-1">⚠️ بعض المواعيد فيها سعر خدمة = 0</p>
-              <p>هذا يحصل مع البيانات المهاجرة من النظام القديم أو لما يُضاف موعد بدون سعر. عشان تشوف الإيراد الفعلي، روحي لتاب <strong>الإيرادات</strong> اللي يعتمد على الفواتير المدفوعة مباشرة.</p>
+              <p className="font-semibold mb-1">⚠️ بعض الفواتير المرتبطة بمواعيد قيمتها 0</p>
+              <p>هذا يحصل مع البيانات المهاجرة من النظام القديم أو لما تُصدر فاتورة بمبلغ 0.</p>
             </div>
           )}
 
@@ -1144,7 +1148,7 @@ function CustomReportBuilder({ slug, branchId }: { slug: string; branchId: strin
 
   const { data: invoicesData } = useQuery({
     queryKey: ['custom-report-invoices', slug, dateFrom, dateTo],
-    queryFn: () => getInvoices(slug, { page: 1, pageSize: 100, dateFrom, dateTo }),
+    queryFn: () => getInvoices(slug, { page: 1, pageSize: 500 }),
     enabled: !!slug && showPreview && neededGroups.has('invoice'),
   })
 
@@ -1166,11 +1170,13 @@ function CustomReportBuilder({ slug, branchId }: { slug: string; branchId: strin
     const rows: Record<string, unknown>[] = []
 
     if (neededGroups.has('invoice')) {
-      ;(invoicesData?.items ?? []).forEach(inv => {
-        const row: Record<string, unknown> = { _group: 'invoice' }
-        selectedFields.filter(f => f.group === 'invoice').forEach(f => { row[f.id] = inv[f.key as keyof typeof inv] })
-        rows.push(row)
-      })
+      ;(invoicesData?.items ?? [])
+        .filter(inv => inv.createdAt.slice(0, 10) >= dateFrom && inv.createdAt.slice(0, 10) <= dateTo)
+        .forEach(inv => {
+          const row: Record<string, unknown> = { _group: 'invoice' }
+          selectedFields.filter(f => f.group === 'invoice').forEach(f => { row[f.id] = inv[f.key as keyof typeof inv] })
+          rows.push(row)
+        })
     }
     if (neededGroups.has('appointment')) {
       ;(apptData?.items ?? []).forEach(appt => {
@@ -1860,16 +1866,14 @@ function ServiceDiscountTab({ slug, branchId }: { slug: string; branchId: string
     }).slice(0, 40),
     [invoicesData, dateFrom, dateTo])
 
-  // Fetch invoice details in parallel
-  const invoiceDetailsQueries = paidInvoicesInRange.map(inv =>
-    // eslint-disable-next-line react-hooks/rules-of-hooks
-    useQuery({
-      queryKey: ['invoice-detail', slug, inv.id],
+  // Fetch invoice details in parallel — must use useQueries (not useQuery in a loop)
+  const invoiceDetailsQueries = useQueries({
+    queries: paidInvoicesInRange.map(inv => ({
+      queryKey: ['invoice-detail', slug, inv.id] as const,
       queryFn: () => getInvoice(slug, inv.id),
-      enabled: paidInvoicesInRange.length > 0,
       staleTime: 10 * 60 * 1000,
-    })
-  )
+    })),
+  })
 
   const detailsLoading = invoiceDetailsQueries.some(q => q.isLoading)
   const allDetails = invoiceDetailsQueries.map(q => q.data).filter(Boolean)
