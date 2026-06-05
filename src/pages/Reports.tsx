@@ -736,27 +736,37 @@ function EmployeesTab({ slug, branchId }: { slug: string; branchId: string | nul
     enabled: !!branchId && !!selectedEmpId,
   })
 
-  // Invoices are the only revenue source for employee reports.
+  // Invoices — source of truth for revenue. Fetch with date range to get relevant ones.
   const { data: invoicesForEmp } = useQuery({
     queryKey: ['invoices-emp-report', slug, dateFrom, dateTo],
-    queryFn: () => getInvoices(slug, { page: 1, pageSize: 500 }),
+    queryFn: () => getInvoices(slug, { page: 1, pageSize: 500, dateFrom, dateTo }),
     enabled: !!slug,
   })
 
-  // Map appointmentId to actual paid amount. Check-in alone must never count as revenue.
-  const invoiceByAppt = useMemo(() => {
-    const map: Record<string, number> = {}
+  const apptItems = apptData?.items ?? []
+  const selectedEmp = (employees ?? []).find(e => e.id === selectedEmpId)
+
+  // appointment id → employee name (from the date-filtered appointment list)
+  const apptEmployeeMap = useMemo(() => {
+    const map: Record<string, string> = {}
+    apptItems.forEach(a => { map[a.id] = a.resourceName || 'غير محدد' })
+    return map
+  }, [apptItems])
+
+  // Revenue per employee — pulled directly from paid invoices linked to appointments in range
+  const empRevenueFromInvoices = useMemo(() => {
+    const map: Record<string, { totalAED: number; invoiceCount: number }> = {}
     ;(invoicesForEmp?.items ?? [])
       .filter(inv => (inv.status === 'Paid' || inv.status === 'PartiallyPaid') && inv.appointmentId)
       .forEach(inv => {
-        const paid = inv.totalPaid ?? inv.total ?? 0
-        map[inv.appointmentId!] = (map[inv.appointmentId!] ?? 0) + paid
+        const empName = apptEmployeeMap[inv.appointmentId!]
+        if (!empName) return
+        if (!map[empName]) map[empName] = { totalAED: 0, invoiceCount: 0 }
+        map[empName].totalAED += inv.totalPaid ?? inv.total ?? 0
+        map[empName].invoiceCount++
       })
     return map
-  }, [invoicesForEmp])
-
-  const apptItems = apptData?.items ?? []
-  const selectedEmp = (employees ?? []).find(e => e.id === selectedEmpId)
+  }, [invoicesForEmp, apptEmployeeMap])
 
   const empStats = useMemo(() => {
     const byName: Record<string, {
@@ -772,15 +782,16 @@ function EmployeesTab({ slug, branchId }: { slug: string; branchId: string | nul
       if (a.status === 'checked_in' || a.status === 'confirmed') byName[name].checkedIn++
       if (a.status === 'no_show') byName[name].noShow++
       if (a.status === 'cancelled') byName[name].cancelled++
-
-      const actualPaid = invoiceByAppt[a.id]
-      if (actualPaid !== undefined) {
-        byName[name].paidCount++
-        byName[name].revenueAED += actualPaid
-      }
+    })
+    // Merge invoice revenue into appointment stats
+    Object.entries(empRevenueFromInvoices).forEach(([name, rev]) => {
+      if (!byName[name]) byName[name] = { total: 0, completed: 0, checkedIn: 0, noShow: 0, cancelled: 0, revenueAED: 0, paidCount: 0 }
+      byName[name].revenueAED = rev.totalAED
+      byName[name].paidCount = rev.invoiceCount
     })
     return byName
-  }, [apptItems, invoiceByAppt])
+  }, [apptItems, empRevenueFromInvoices])
+
   const totalRevenue = Object.values(empStats).reduce((s, e) => s + e.revenueAED, 0)
 
   // Attendance summary for selected employee
