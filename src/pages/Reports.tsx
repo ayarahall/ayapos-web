@@ -665,6 +665,7 @@ function ExpensesTab({ slug }: { slug: string }) {
     queryKey: ['expenses-report', slug, dateFrom, dateTo],
     queryFn: () => getExpenses(slug, { page: 1, pageSize: 1000 }),
     enabled: !!slug,
+    staleTime: 0,
   })
 
   const allItems = data?.items ?? []
@@ -1691,8 +1692,9 @@ function RevenueTab({ slug, branchId }: { slug: string; branchId: string | null 
   // Expenses
   const { data: expData, isLoading: expLoading } = useQuery({
     queryKey: ['pl-expenses', slug],
-    queryFn: () => getExpenses(slug, { page: 1, pageSize: 500 }),
+    queryFn: () => getExpenses(slug, { page: 1, pageSize: 1000 }),
     enabled: !!slug,
+    staleTime: 0,
   })
 
   // Sessions — for cash/card/transfer breakdown
