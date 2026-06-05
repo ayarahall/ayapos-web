@@ -561,6 +561,91 @@ function AppointmentsTab({ slug, branchId }: { slug: string; branchId: string | 
   )
 }
 
+// ─── Donut chart (expenses by category) ──────────────────────────────────────
+
+const DONUT_COLORS = [
+  '#e40046', '#f97316', '#eab308', '#22c55e', '#06b6d4',
+  '#8b5cf6', '#ec4899', '#14b8a6', '#f43f5e', '#a855f7',
+]
+
+interface DonutSlice { label: string; value: number; color: string }
+
+function DonutChart({ slices }: { slices: DonutSlice[] }) {
+  const [hovered, setHovered] = useState<number | null>(null)
+  const total = slices.reduce((s, d) => s + d.value, 0)
+  if (total === 0) return <p className="text-center text-gray-400 py-8 text-sm">لا توجد مصاريف</p>
+
+  const R = 70, cx = 90, cy = 90, stroke = 28
+  let angle = -Math.PI / 2
+
+  const paths = slices.map((slice, i) => {
+    const pct = slice.value / total
+    const sweep = pct * 2 * Math.PI
+    const x1 = cx + R * Math.cos(angle)
+    const y1 = cy + R * Math.sin(angle)
+    angle += sweep
+    const x2 = cx + R * Math.cos(angle)
+    const y2 = cy + R * Math.sin(angle)
+    const large = sweep > Math.PI ? 1 : 0
+    return { path: `M ${x1} ${y1} A ${R} ${R} 0 ${large} 1 ${x2} ${y2}`, pct, i, color: slice.color }
+  })
+
+  const hov = hovered !== null ? slices[hovered] : null
+
+  return (
+    <div className="flex items-center gap-6 flex-wrap">
+      {/* SVG donut */}
+      <div className="relative flex-shrink-0">
+        <svg width={180} height={180}>
+          {paths.map(({ path, color, i }) => (
+            <path key={i} d={path} fill="none" stroke={color}
+              strokeWidth={hovered === i ? stroke + 4 : stroke}
+              strokeLinecap="butt"
+              style={{ transition: 'stroke-width 0.15s', cursor: 'pointer', opacity: hovered !== null && hovered !== i ? 0.55 : 1 }}
+              onMouseEnter={() => setHovered(i)}
+              onMouseLeave={() => setHovered(null)} />
+          ))}
+        </svg>
+        {/* Center label */}
+        <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
+          {hov ? (
+            <>
+              <span className="text-xs text-gray-500 text-center px-2 leading-tight">{hov.label}</span>
+              <span className="text-sm font-bold mt-0.5" style={{ color: hov.color }}>{hov.value.toFixed(0)}</span>
+              <span className="text-xs text-gray-400">AED</span>
+            </>
+          ) : (
+            <>
+              <span className="text-xs text-gray-400">الإجمالي</span>
+              <span className="text-base font-bold text-gray-800">{total.toFixed(0)}</span>
+              <span className="text-xs text-gray-400">AED</span>
+            </>
+          )}
+        </div>
+      </div>
+
+      {/* Legend */}
+      <div className="flex-1 min-w-0 space-y-2">
+        {slices.map((slice, i) => {
+          const pct = ((slice.value / total) * 100).toFixed(1)
+          return (
+            <div key={i}
+              className="flex items-center gap-2 cursor-pointer rounded-lg px-2 py-1 transition-colors"
+              style={{ backgroundColor: hovered === i ? slice.color + '18' : undefined }}
+              onMouseEnter={() => setHovered(i)}
+              onMouseLeave={() => setHovered(null)}>
+              <span className="w-3 h-3 rounded-full flex-shrink-0" style={{ backgroundColor: slice.color }} />
+              <span className="flex-1 text-sm text-gray-700 truncate">{slice.label}</span>
+              <span className="text-xs font-semibold text-gray-500 flex-shrink-0">{pct}%</span>
+              <span className="text-xs font-bold flex-shrink-0" style={{ color: slice.color }}>{slice.value.toFixed(2)}</span>
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
 // ─── Expenses tab ─────────────────────────────────────────────────────────────
 
 function ExpensesTab({ slug }: { slug: string }) {
@@ -604,10 +689,9 @@ function ExpensesTab({ slug }: { slug: string }) {
     draft: 'gray', submitted: 'yellow', approved: 'green', rejected: 'red', paid: 'blue', cancelled: 'gray',
   }
 
-  const expBars: SalesBar[] = Object.entries(stats.byCategory)
+  const donutSlices: DonutSlice[] = Object.entries(stats.byCategory)
     .sort((a, b) => b[1] - a[1])
-    .slice(0, 8)
-    .map(([cat, amt]) => ({ label: cat.slice(0, 6), cents: Math.round(amt * 100) }))
+    .map(([label, value], i) => ({ label, value, color: DONUT_COLORS[i % DONUT_COLORS.length] }))
 
   return (
     <div className="space-y-5">
@@ -625,17 +709,15 @@ function ExpensesTab({ slug }: { slug: string }) {
             <StatCard icon={Receipt} label="معتمدة" value={fmtN(stats.byStatus['approved'] ?? 0)} color="green" />
           </div>
 
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-            <Card title="المصاريف حسب الفئة">
-              <div className="px-5 py-4">
-                {expBars.length === 0 ? (
-                  <p className="text-center text-gray-400 py-8 text-sm">لا توجد مصاريف</p>
-                ) : (
-                  <SalesBarChart bars={expBars} />
-                )}
-              </div>
-            </Card>
+          {/* Donut chart — توزيع المصاريف حسب النوع */}
+          <Card title="توزيع المصاريف حسب الفئة">
+            <div className="px-5 py-5">
+              <DonutChart slices={donutSlices} />
+            </div>
+          </Card>
 
+          {/* Status + detail table */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
             <Card title="توزيع الحالات">
               <div className="px-5 py-4 space-y-3">
                 {Object.entries(stats.byStatus).map(([status, count]) => (
@@ -647,26 +729,29 @@ function ExpensesTab({ slug }: { slug: string }) {
                 {items.length === 0 && <p className="text-center text-gray-400 py-6 text-sm">لا توجد مصاريف</p>}
               </div>
             </Card>
-          </div>
 
-          {/* Top categories table */}
-          <Card title="تفاصيل الفئات">
-            <div className="divide-y divide-gray-50">
-              {Object.entries(stats.byCategory).sort((a, b) => b[1] - a[1]).map(([cat, amt]) => (
-                <div key={cat} className="flex items-center gap-3 px-5 py-2.5">
-                  <span className="flex-1 text-sm font-medium text-gray-800">{cat}</span>
-                  <div className="w-40 h-2 bg-gray-100 rounded-full overflow-hidden">
-                    <div className="h-full rounded-full bg-rose-400"
-                      style={{ width: `${stats.totalAmount > 0 ? (amt / stats.totalAmount) * 100 : 0}%` }} />
+            <Card title="تفاصيل الفئات">
+              <div className="divide-y divide-gray-50">
+                {donutSlices.map(({ label, value, color }, i) => (
+                  <div key={i} className="flex items-center gap-3 px-5 py-2.5">
+                    <span className="w-3 h-3 rounded-full flex-shrink-0" style={{ backgroundColor: color }} />
+                    <span className="flex-1 text-sm font-medium text-gray-800">{label}</span>
+                    <div className="w-32 h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                      <div className="h-full rounded-full transition-all"
+                        style={{ width: `${stats.totalAmount > 0 ? (value / stats.totalAmount) * 100 : 0}%`, backgroundColor: color }} />
+                    </div>
+                    <span className="text-xs text-gray-400 w-10 text-end flex-shrink-0">
+                      {stats.totalAmount > 0 ? ((value / stats.totalAmount) * 100).toFixed(0) : 0}%
+                    </span>
+                    <span className="text-sm font-semibold text-gray-900 w-24 text-end">{value.toFixed(2)} AED</span>
                   </div>
-                  <span className="text-sm font-semibold text-gray-900 w-28 text-end">{amt.toFixed(2)} AED</span>
-                </div>
-              ))}
-              {Object.keys(stats.byCategory).length === 0 && (
-                <p className="text-center text-gray-400 py-8 text-sm">لا توجد بيانات</p>
-              )}
-            </div>
-          </Card>
+                ))}
+                {donutSlices.length === 0 && (
+                  <p className="text-center text-gray-400 py-8 text-sm">لا توجد بيانات</p>
+                )}
+              </div>
+            </Card>
+          </div>
         </>
       )}
     </div>
