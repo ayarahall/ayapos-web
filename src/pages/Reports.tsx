@@ -668,7 +668,10 @@ function ExpensesTab({ slug }: { slug: string }) {
   })
 
   const allItems = data?.items ?? []
-  const items = allItems.filter(e => e.expenseDate >= dateFrom && e.expenseDate <= dateTo)
+  const items = allItems.filter(e => {
+    const d = e.expenseDate.slice(0, 10)
+    return d >= dateFrom && d <= dateTo
+  })
 
   const stats = useMemo(() => {
     const byCategory: Record<string, number> = {}
@@ -1282,7 +1285,7 @@ function CustomReportBuilder({ slug, branchId }: { slug: string; branchId: strin
       })
     }
     if (neededGroups.has('expense')) {
-      const expItems = (expData?.items ?? []).filter(e => e.expenseDate >= dateFrom && e.expenseDate <= dateTo)
+      const expItems = (expData?.items ?? []).filter(e => { const d = e.expenseDate.slice(0, 10); return d >= dateFrom && d <= dateTo })
       expItems.forEach(exp => {
         const row: Record<string, unknown> = { _group: 'expense' }
         selectedFields.filter(f => f.group === 'expense').forEach(f => { row[f.id] = exp[f.key as keyof typeof exp] })
