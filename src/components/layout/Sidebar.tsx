@@ -2,7 +2,7 @@
 import {
   LayoutDashboard, ShoppingCart, FileText, Package, Wrench,
   CalendarDays, Receipt, Tag, Users, UserCog, Building2,
-  BarChart3, Settings, LogOut, Bell, LayoutPanelTop,
+  BarChart3, Settings, LogOut, Bell, LayoutPanelTop, FolderOpen,
 } from 'lucide-react'
 import { useQuery } from '@tanstack/react-query'
 import { useAuthStore } from '../../store/authStore'
@@ -21,6 +21,7 @@ const navItems = [
   { to: '/services', icon: Wrench, key: 'services', tenantOnly: true, tenantAdminHide: true, permissionKey: 'services' },
   { to: '/appointments', icon: CalendarDays, key: 'appointments', tenantOnly: true, permissionKey: 'appointments' },
   { to: '/expenses', icon: Receipt, key: 'expenses', tenantOnly: true, permissionKey: 'expenses' },
+  { to: '/documents', icon: FolderOpen, key: 'documents', tenantOnly: true, permissionKey: 'documents' },
   { to: '/categories', icon: Tag, key: 'categories', tenantOnly: true },
   { to: '/customers', icon: Users, key: 'customers', tenantOnly: true, permissionKey: 'customers' },
   { to: '/users', icon: UserCog, key: 'users', permissionKey: 'users' },

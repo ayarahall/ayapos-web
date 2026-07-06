@@ -16,6 +16,7 @@ export default function AppLayout() {
     '/services': t.nav.services,
     '/appointments': t.nav.appointments,
     '/expenses': t.nav.expenses,
+    '/documents': t.nav.documents,
     '/categories': t.nav.categories,
     '/customers': t.nav.customers,
     '/users': t.nav.users,

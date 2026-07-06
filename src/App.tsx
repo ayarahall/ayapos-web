@@ -19,6 +19,7 @@ import Reports from './pages/Reports'
 import Settings from './pages/Settings'
 import TenantAdmin from './pages/TenantAdmin'
 import Inbox from './pages/Inbox'
+import Documents from './pages/Documents'
 
 const ADMIN_ROLES = new Set(['OWNER', 'ADMIN', 'TENANT'])
 
@@ -186,6 +187,14 @@ export default function App() {
           <Route path="categories" element={<Categories />} />
           <Route path="tenant-admin" element={<PermissionGuard adminOnly><TenantAdmin /></PermissionGuard>} />
           <Route path="inbox" element={<Inbox />} />
+          <Route
+            path="documents"
+            element={
+              <PermissionGuard permissionKey="documents">
+                <Documents />
+              </PermissionGuard>
+            }
+          />
         </Route>
         <Route path="*" element={<Navigate to="/dashboard" replace />} />
       </Routes>
