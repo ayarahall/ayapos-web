@@ -104,3 +104,7 @@ export async function retryDocument(tenantSlug: string, id: string): Promise<Doc
   const res = await client.post<DocumentUpload>(`/t/${tenantSlug}/documents/${id}/retry`)
   return res.data
 }
+
+export async function deleteDocument(tenantSlug: string, id: string): Promise<void> {
+  await client.delete(`/t/${tenantSlug}/documents/${id}`)
+}

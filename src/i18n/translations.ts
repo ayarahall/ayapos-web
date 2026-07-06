@@ -342,6 +342,8 @@
     approveRequiresReview: 'راجعي الحقول وخزنيها قبل الاعتماد',
     retry: 'إعادة المحاولة', retrySuccess: 'تمت إعادة الجدولة',
     failureReason: 'سبب الفشل', noExtractionYet: 'لسا ما انعمل استخراج لهاد المستند',
+    deleteDocument: 'حذف المستند', deleteConfirmBody: 'رح يتم حذف المستند من القائمة. هل تريدين المتابعة؟',
+    deleteSuccess: 'تم حذف المستند',
   },
 }
 
@@ -689,6 +691,8 @@ const en = {
     approveRequiresReview: 'Review and save the fields before approving',
     retry: 'Retry', retrySuccess: 'Re-queued',
     failureReason: 'Failure Reason', noExtractionYet: 'No extraction has run for this document yet',
+    deleteDocument: 'Delete document', deleteConfirmBody: 'This document will be removed from the list. Continue?',
+    deleteSuccess: 'Document deleted',
   },
 }
 

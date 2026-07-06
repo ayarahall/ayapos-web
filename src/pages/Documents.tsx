@@ -1,9 +1,9 @@
 import { useRef, useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Upload, Search, FileText, Eye, History, UploadCloud, ClipboardCheck, RefreshCw, CheckCircle2 } from 'lucide-react'
+import { Upload, Search, FileText, Eye, History, UploadCloud, ClipboardCheck, RefreshCw, CheckCircle2, Trash2 } from 'lucide-react'
 import {
   getDocuments, uploadDocument, getDocumentFileBlobUrl, getDocumentAuditLog,
-  reviewDocument, approveDocument, retryDocument,
+  reviewDocument, approveDocument, retryDocument, deleteDocument,
   type DocumentType, type LanguageHint, type DocumentStatus, type DocumentUpload,
 } from '../api/documents'
 import { useAuthStore } from '../store/authStore'
@@ -71,6 +71,7 @@ export default function Documents() {
   const [auditDocId, setAuditDocId] = useState<string | null>(null)
   const [reviewDoc, setReviewDoc] = useState<DocumentUpload | null>(null)
   const [reviewForm, setReviewForm] = useState<ReviewForm>(EMPTY_REVIEW_FORM)
+  const [deleteDocId, setDeleteDocId] = useState<string | null>(null)
 
   const fileInputRef = useRef<HTMLInputElement>(null)
 
@@ -122,6 +123,16 @@ export default function Documents() {
     onSuccess: () => {
       invalidateDocuments()
       toast.success(t.documents.retrySuccess)
+    },
+  })
+
+  const deleteMut = useMutation({
+    mutationFn: (id: string) => deleteDocument(slug, id),
+    onSuccess: () => {
+      invalidateDocuments()
+      toast.success(t.documents.deleteSuccess)
+      setDeleteDocId(null)
+      setReviewDoc((cur) => (cur?.id === deleteDocId ? null : cur))
     },
   })
 
@@ -319,6 +330,13 @@ export default function Documents() {
                             <RefreshCw size={15} />
                           </button>
                         )}
+                        <button
+                          onClick={() => setDeleteDocId(doc.id)}
+                          className="p-1.5 rounded hover:bg-red-50 text-gray-400 hover:text-red-600 transition-colors"
+                          title={t.documents.deleteDocument}
+                        >
+                          <Trash2 size={15} />
+                        </button>
                       </div>
                     </td>
                   </tr>
@@ -409,6 +427,28 @@ export default function Documents() {
             )}
           </div>
         )}
+      </Modal>
+
+      {/* Delete confirm modal */}
+      <Modal
+        open={!!deleteDocId}
+        onClose={() => setDeleteDocId(null)}
+        title={t.documents.deleteDocument}
+        size="sm"
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setDeleteDocId(null)}>{t.common.cancel}</Button>
+            <Button
+              variant="danger"
+              onClick={() => deleteDocId && deleteMut.mutate(deleteDocId)}
+              loading={deleteMut.isPending}
+            >
+              <Trash2 size={16} />{t.common.delete}
+            </Button>
+          </>
+        }
+      >
+        <p className="text-sm text-gray-600">{t.documents.deleteConfirmBody}</p>
       </Modal>
     </div>
   )
