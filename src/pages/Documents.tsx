@@ -1,9 +1,10 @@
 import { useRef, useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Upload, Search, FileText, Eye, History, UploadCloud } from 'lucide-react'
+import { Upload, Search, FileText, Eye, History, UploadCloud, ClipboardCheck, RefreshCw, CheckCircle2 } from 'lucide-react'
 import {
   getDocuments, uploadDocument, getDocumentFileBlobUrl, getDocumentAuditLog,
-  type DocumentType, type LanguageHint, type DocumentStatus,
+  reviewDocument, approveDocument, retryDocument,
+  type DocumentType, type LanguageHint, type DocumentStatus, type DocumentUpload,
 } from '../api/documents'
 import { useAuthStore } from '../store/authStore'
 import { useLangStore } from '../store/langStore'
@@ -13,9 +14,28 @@ import Card from '../components/ui/Card'
 import Badge from '../components/ui/Badge'
 import Button from '../components/ui/Button'
 import Modal from '../components/ui/Modal'
+import Input from '../components/ui/Input'
 import Spinner from '../components/ui/Spinner'
 
-const DOCUMENT_TYPES: DocumentType[] = ['SCANNED_FORM', 'CERTIFICATE', 'CONSENT_FORM', 'REPORT', 'OTHER']
+const DOCUMENT_TYPES: DocumentType[] = ['SCANNED_FORM', 'CERTIFICATE', 'CONSENT_FORM', 'REPORT', 'SERVICE_RECEIPT', 'OTHER']
+const REVIEW_FIELD_KEYS = ['customerName', 'service', 'price', 'customerPhone', 'changeAmount'] as const
+type ReviewFieldKey = typeof REVIEW_FIELD_KEYS[number]
+type ReviewForm = Record<ReviewFieldKey, string>
+const EMPTY_REVIEW_FORM: ReviewForm = { customerName: '', service: '', price: '', customerPhone: '', changeAmount: '' }
+
+function parseFieldsJson(json?: string | null): ReviewForm {
+  const result = { ...EMPTY_REVIEW_FORM }
+  if (!json) return result
+  try {
+    const parsed = JSON.parse(json) as Record<string, string | null | undefined>
+    for (const key of REVIEW_FIELD_KEYS) {
+      result[key] = parsed[key] ?? ''
+    }
+  } catch {
+    // malformed JSON — fall back to empty form rather than crashing the modal
+  }
+  return result
+}
 const LANGUAGE_HINTS: LanguageHint[] = ['auto', 'ar', 'en']
 const STATUS_VARIANT: Record<DocumentStatus, 'gray' | 'blue' | 'purple' | 'yellow' | 'green' | 'red'> = {
   PENDING: 'gray',
@@ -49,6 +69,8 @@ export default function Documents() {
   const [uploadDocType, setUploadDocType] = useState<DocumentType>('OTHER')
   const [uploadLangHint, setUploadLangHint] = useState<LanguageHint>('auto')
   const [auditDocId, setAuditDocId] = useState<string | null>(null)
+  const [reviewDoc, setReviewDoc] = useState<DocumentUpload | null>(null)
+  const [reviewForm, setReviewForm] = useState<ReviewForm>(EMPTY_REVIEW_FORM)
 
   const fileInputRef = useRef<HTMLInputElement>(null)
 
@@ -75,10 +97,46 @@ export default function Documents() {
     enabled: !!slug && !!auditDocId,
   })
 
+  const invalidateDocuments = () => qc.invalidateQueries({ queryKey: ['documents', slug, branchId ?? 'login-branch'] })
+
+  const reviewMut = useMutation({
+    mutationFn: (fields: ReviewForm) => reviewDocument(slug, reviewDoc!.id, fields),
+    onSuccess: (updated) => {
+      invalidateDocuments()
+      setReviewDoc(updated)
+      toast.success(t.documents.reviewSaved)
+    },
+  })
+
+  const approveMut = useMutation({
+    mutationFn: () => approveDocument(slug, reviewDoc!.id),
+    onSuccess: () => {
+      invalidateDocuments()
+      toast.success(t.documents.approved)
+      setReviewDoc(null)
+    },
+  })
+
+  const retryMut = useMutation({
+    mutationFn: (id: string) => retryDocument(slug, id),
+    onSuccess: () => {
+      invalidateDocuments()
+      toast.success(t.documents.retrySuccess)
+    },
+  })
+
   const handleFile = (file: File | null | undefined) => {
     if (!file) return
     uploadMut.mutate(file)
   }
+
+  const openReview = (doc: DocumentUpload) => {
+    setReviewDoc(doc)
+    setReviewForm(parseFieldsJson(doc.reviewedFieldsJson ?? doc.extractedFieldsJson))
+  }
+
+  const reviewField = (key: ReviewFieldKey) => (e: React.ChangeEvent<HTMLInputElement>) =>
+    setReviewForm((p) => ({ ...p, [key]: e.target.value }))
 
   const handleViewOriginal = async (id: string) => {
     try {
@@ -217,6 +275,11 @@ export default function Documents() {
                     <td className="px-4 py-3 text-gray-600">{formatFileSize(doc.fileSizeBytes)}</td>
                     <td className="px-4 py-3">
                       <Badge variant={STATUS_VARIANT[doc.status] ?? 'gray'}>{t.documents.statuses[doc.status]}</Badge>
+                      {doc.status === 'FAILED' && doc.failureReason && (
+                        <p className="text-xs text-red-500 mt-1 max-w-[180px] truncate" title={doc.failureReason}>
+                          {doc.failureReason}
+                        </p>
+                      )}
                     </td>
                     <td className="px-4 py-3 text-gray-500">
                       {new Date(doc.createdAt).toLocaleString(locale)}
@@ -237,6 +300,25 @@ export default function Documents() {
                         >
                           <History size={15} />
                         </button>
+                        {(doc.status === 'EXTRACTED' || doc.status === 'REVIEWED' || doc.status === 'APPROVED') && (
+                          <button
+                            onClick={() => openReview(doc)}
+                            className="p-1.5 rounded hover:bg-blue-50 text-gray-400 hover:text-blue-600 transition-colors"
+                            title={t.documents.review}
+                          >
+                            {doc.status === 'APPROVED' ? <CheckCircle2 size={15} className="text-green-500" /> : <ClipboardCheck size={15} />}
+                          </button>
+                        )}
+                        {doc.status === 'FAILED' && (
+                          <button
+                            onClick={() => retryMut.mutate(doc.id)}
+                            disabled={retryMut.isPending}
+                            className="p-1.5 rounded hover:bg-blue-50 text-gray-400 hover:text-blue-600 transition-colors disabled:opacity-40"
+                            title={t.documents.retry}
+                          >
+                            <RefreshCw size={15} />
+                          </button>
+                        )}
                       </div>
                     </td>
                   </tr>
@@ -279,6 +361,53 @@ export default function Documents() {
               </li>
             ))}
           </ul>
+        )}
+      </Modal>
+
+      {/* Review / approve modal */}
+      <Modal
+        open={!!reviewDoc}
+        onClose={() => setReviewDoc(null)}
+        title={t.documents.reviewTitle}
+        size="lg"
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setReviewDoc(null)}>{t.common.cancel}</Button>
+            <Button variant="secondary" onClick={() => reviewMut.mutate(reviewForm)} loading={reviewMut.isPending}>
+              {t.documents.saveReview}
+            </Button>
+            <Button onClick={() => approveMut.mutate()} loading={approveMut.isPending} disabled={reviewDoc?.status === 'APPROVED'}>
+              <CheckCircle2 size={16} />{t.documents.approveDocument}
+            </Button>
+          </>
+        }
+      >
+        {reviewDoc && (
+          <div className="space-y-5">
+            {!reviewDoc.extractedText && !reviewDoc.extractedFieldsJson && (
+              <p className="text-sm text-gray-400">{t.documents.noExtractionYet}</p>
+            )}
+
+            <div className="grid grid-cols-2 gap-4">
+              <Input label={t.documents.customerName} value={reviewForm.customerName} onChange={reviewField('customerName')} />
+              <Input label={t.documents.service} value={reviewForm.service} onChange={reviewField('service')} />
+              <Input label={t.documents.price} value={reviewForm.price} onChange={reviewField('price')} />
+              <Input label={t.documents.customerPhone} value={reviewForm.customerPhone} onChange={reviewField('customerPhone')} />
+              <Input label={t.documents.changeAmount} value={reviewForm.changeAmount} onChange={reviewField('changeAmount')} />
+            </div>
+
+            {reviewDoc.extractedText && (
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">{t.documents.extractedTextLabel}</label>
+                <textarea
+                  readOnly
+                  value={reviewDoc.extractedText}
+                  rows={8}
+                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-xs text-gray-600 bg-gray-50 font-mono resize-y"
+                />
+              </div>
+            )}
+          </div>
         )}
       </Modal>
     </div>

@@ -322,7 +322,8 @@
     uploadSuccess: 'تم رفع المستند بنجاح',
     types: {
       SCANNED_FORM: 'نموذج ممسوح ضوئياً', CERTIFICATE: 'شهادة',
-      CONSENT_FORM: 'نموذج موافقة', REPORT: 'تقرير', OTHER: 'أخرى',
+      CONSENT_FORM: 'نموذج موافقة', REPORT: 'تقرير',
+      SERVICE_RECEIPT: 'فاتورة خدمة', OTHER: 'أخرى',
     },
     languages: { ar: 'عربي', en: 'إنجليزي', auto: 'تلقائي' },
     statuses: {
@@ -330,6 +331,17 @@
       EXTRACTED: 'تم الاستخراج', REVIEWED: 'تمت المراجعة',
       APPROVED: 'معتمد', FAILED: 'فشل',
     },
+    review: 'مراجعة',
+    reviewTitle: 'مراجعة البيانات المستخرجة',
+    extractedTextLabel: 'النص الخام المستخرج (OCR)',
+    fieldsLabel: 'الحقول المستخرجة — راجعي وعدّلي قبل الاعتماد',
+    customerName: 'اسم العميل', service: 'الخدمة', price: 'السعر',
+    customerPhone: 'رقم العميل', changeAmount: 'الصرف',
+    saveReview: 'حفظ المراجعة', approveDocument: 'اعتماد',
+    reviewSaved: 'تم حفظ المراجعة', approved: 'تم الاعتماد',
+    approveRequiresReview: 'راجعي الحقول وخزنيها قبل الاعتماد',
+    retry: 'إعادة المحاولة', retrySuccess: 'تمت إعادة الجدولة',
+    failureReason: 'سبب الفشل', noExtractionYet: 'لسا ما انعمل استخراج لهاد المستند',
   },
 }
 
@@ -657,7 +669,8 @@ const en = {
     uploadSuccess: 'Document uploaded successfully',
     types: {
       SCANNED_FORM: 'Scanned Form', CERTIFICATE: 'Certificate',
-      CONSENT_FORM: 'Consent Form', REPORT: 'Report', OTHER: 'Other',
+      CONSENT_FORM: 'Consent Form', REPORT: 'Report',
+      SERVICE_RECEIPT: 'Service Receipt', OTHER: 'Other',
     },
     languages: { ar: 'Arabic', en: 'English', auto: 'Auto-detect' },
     statuses: {
@@ -665,6 +678,17 @@ const en = {
       EXTRACTED: 'Extracted', REVIEWED: 'Reviewed',
       APPROVED: 'Approved', FAILED: 'Failed',
     },
+    review: 'Review',
+    reviewTitle: 'Review Extracted Data',
+    extractedTextLabel: 'Raw OCR Text',
+    fieldsLabel: 'Extracted Fields — review and correct before approving',
+    customerName: 'Customer Name', service: 'Service', price: 'Price',
+    customerPhone: 'Customer Phone', changeAmount: 'Change Amount',
+    saveReview: 'Save Review', approveDocument: 'Approve',
+    reviewSaved: 'Review saved', approved: 'Approved',
+    approveRequiresReview: 'Review and save the fields before approving',
+    retry: 'Retry', retrySuccess: 'Re-queued',
+    failureReason: 'Failure Reason', noExtractionYet: 'No extraction has run for this document yet',
   },
 }
 

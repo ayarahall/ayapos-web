@@ -1,9 +1,18 @@
 import client from './client'
 import type { PagedResult } from '../types'
 
-export type DocumentType = 'SCANNED_FORM' | 'CERTIFICATE' | 'CONSENT_FORM' | 'REPORT' | 'OTHER'
+export type DocumentType = 'SCANNED_FORM' | 'CERTIFICATE' | 'CONSENT_FORM' | 'REPORT' | 'SERVICE_RECEIPT' | 'OTHER'
 export type DocumentStatus = 'PENDING' | 'PROCESSING' | 'EXTRACTED' | 'REVIEWED' | 'APPROVED' | 'FAILED'
 export type LanguageHint = 'ar' | 'en' | 'auto'
+
+// Fields the rule-based extractor looks for on SERVICE_RECEIPT documents.
+export interface ServiceReceiptFields {
+  customerName?: string | null
+  service?: string | null
+  price?: string | null
+  customerPhone?: string | null
+  changeAmount?: string | null
+}
 
 export interface DocumentUpload {
   id: string
@@ -14,6 +23,9 @@ export interface DocumentUpload {
   languageHint: LanguageHint
   status: DocumentStatus
   failureReason?: string | null
+  extractedText?: string | null
+  extractedFieldsJson?: string | null
+  reviewedFieldsJson?: string | null
   createdAt: string
   updatedAt: string
 }
@@ -71,5 +83,24 @@ export async function getDocumentFileBlobUrl(tenantSlug: string, id: string): Pr
 
 export async function getDocumentAuditLog(tenantSlug: string, id: string): Promise<DocumentAuditLogEntry[]> {
   const res = await client.get<DocumentAuditLogEntry[]>(`/t/${tenantSlug}/documents/${id}/audit-log`)
+  return res.data
+}
+
+export async function reviewDocument(
+  tenantSlug: string,
+  id: string,
+  fields: Record<string, string | null | undefined>
+): Promise<DocumentUpload> {
+  const res = await client.put<DocumentUpload>(`/t/${tenantSlug}/documents/${id}/review`, { fields })
+  return res.data
+}
+
+export async function approveDocument(tenantSlug: string, id: string): Promise<DocumentUpload> {
+  const res = await client.post<DocumentUpload>(`/t/${tenantSlug}/documents/${id}/approve`)
+  return res.data
+}
+
+export async function retryDocument(tenantSlug: string, id: string): Promise<DocumentUpload> {
+  const res = await client.post<DocumentUpload>(`/t/${tenantSlug}/documents/${id}/retry`)
   return res.data
 }
