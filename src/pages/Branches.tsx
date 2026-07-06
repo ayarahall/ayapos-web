@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   Building2, Plus, Store, Pencil, Users, Calendar, RefreshCw,
   ChevronDown, ChevronRight, Key, ToggleLeft, ToggleRight,
-  CheckCircle, XCircle, UserPlus, PowerOff, Power,
+  CheckCircle, XCircle, UserPlus, PowerOff, Power, CalendarClock,
 } from 'lucide-react'
 import {
   getTenants, getTenantBranches, createBranch, createTenant,
@@ -47,6 +47,8 @@ function BranchUserRow({
   const qc = useQueryClient()
   const [pwdModal, setPwdModal] = useState(false)
   const [newPwd, setNewPwd] = useState('')
+  const [licenseModal, setLicenseModal] = useState(false)
+  const [licenseForm, setLicenseForm] = useState({ licensePlan: u.licensePlan ?? 'MONTHLY', licenseStartedAt: '' })
 
   const pwdMut = useMutation({
     mutationFn: () => setPlatformBranchUserPassword(tenantId, branchId, u.id, newPwd),
@@ -59,6 +61,18 @@ function BranchUserRow({
       isActive: !u.isActive,
     }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['platform-branch-users', tenantId, branchId] }),
+  })
+
+  const renewMut = useMutation({
+    mutationFn: () => updatePlatformBranchUserLicense(tenantId, branchId, u.id, {
+      licensePlan: licenseForm.licensePlan,
+      isActive: true,
+      licenseStartedAt: licenseForm.licenseStartedAt || undefined,
+    }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['platform-branch-users', tenantId, branchId] })
+      setLicenseModal(false)
+    },
   })
 
   return (
@@ -104,6 +118,16 @@ function BranchUserRow({
           >
             <Key size={15} />
           </button>
+          <button
+            onClick={() => {
+              setLicenseForm({ licensePlan: u.licensePlan ?? 'MONTHLY', licenseStartedAt: '' })
+              setLicenseModal(true)
+            }}
+            className="p-1.5 rounded hover:bg-blue-50 text-gray-400 hover:text-blue-600 transition-colors"
+            title={t.users.renewLicense}
+          >
+            <CalendarClock size={15} />
+          </button>
         </div>
       </td>
 
@@ -118,6 +142,38 @@ function BranchUserRow({
         <Input label={t.users.newPassword} type="password" value={newPwd}
           onChange={e => setNewPwd(e.target.value)} />
         {pwdMut.isError && <p className="text-sm text-red-500 mt-2">{t.common.error}</p>}
+      </Modal>
+
+      <Modal open={licenseModal} onClose={() => setLicenseModal(false)} title={`${t.users.renewLicense} — ${u.username}`} size="sm"
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setLicenseModal(false)}>{t.common.cancel}</Button>
+            <Button onClick={() => renewMut.mutate()} loading={renewMut.isPending}>{t.common.save}</Button>
+          </>
+        }
+      >
+        <div className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">{t.users.licensePlan}</label>
+            <div className="grid grid-cols-2 gap-2">
+              {(['MONTHLY', 'YEARLY'] as const).map(plan => (
+                <button key={plan} type="button"
+                  onClick={() => setLicenseForm(p => ({ ...p, licensePlan: plan }))}
+                  className={`py-2.5 rounded-lg border-2 text-sm font-semibold transition-all
+                    ${licenseForm.licensePlan === plan
+                      ? 'border-blue-500 bg-blue-50 text-blue-700'
+                      : 'border-gray-200 text-gray-600 hover:border-gray-300'}`}
+                >
+                  {plan === 'MONTHLY' ? t.users.monthly : t.users.yearly}
+                </button>
+              ))}
+            </div>
+          </div>
+          <Input label={t.users.startDate} type="date" value={licenseForm.licenseStartedAt}
+            onChange={e => setLicenseForm(p => ({ ...p, licenseStartedAt: e.target.value }))} />
+          <p className="text-xs text-gray-400">{t.users.renewLicenseHint}</p>
+          {renewMut.isError && <p className="text-sm text-red-500">{t.common.error}</p>}
+        </div>
       </Modal>
     </tr>
   )
@@ -812,3 +868,4 @@ export default function Branches() {
     </div>
   )
 }
+ 

@@ -1,9 +1,10 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { UserCog, Plus, Key, Shield, ChevronDown, ChevronUp, Crown, ToggleLeft, ToggleRight } from 'lucide-react'
+import { UserCog, Plus, Key, Shield, ChevronDown, ChevronUp, Crown, ToggleLeft, ToggleRight, CalendarClock } from 'lucide-react'
 import {
   getTenants, getTenantUsers, createTenantUser, setTenantUserPassword,
   getOwners, createOwner, updateOwnerStatus, setOwnerPassword,
+  updateTenantUserLicense,
 } from '../api/platform'
 import {
   getTenantBranches, getBranchUsers, createBranchUser,
@@ -422,6 +423,9 @@ export default function Users() {
   const [pwdModal, setPwdModal] = useState(false)
   const [pwdUserId, setPwdUserId] = useState<string | null>(null)
   const [newPwd, setNewPwd] = useState('')
+  const [licenseModal, setLicenseModal] = useState(false)
+  const [licenseUserId, setLicenseUserId] = useState<string | null>(null)
+  const [licenseForm, setLicenseForm] = useState({ licensePlan: 'MONTHLY', maxUsers: '5', licenseStartedAt: '' })
   const [form, setForm] = useState({ username: '', role: 'CASHIER', password: '', pin: '1234' })
 
   const { data: tenants = [], isLoading: tenantsLoading } = useQuery({
@@ -456,6 +460,19 @@ export default function Users() {
   const pwdMut = useMutation({
     mutationFn: () => setTenantUserPassword(activeTenantId!, pwdUserId!, newPwd),
     onSuccess: () => { setPwdModal(false); setNewPwd(''); setPwdUserId(null) },
+  })
+
+  const licenseMut = useMutation({
+    mutationFn: () => updateTenantUserLicense(activeTenantId!, licenseUserId!, {
+      licensePlan: licenseForm.licensePlan,
+      maxUsers: Number(licenseForm.maxUsers) || 5,
+      isActive: true,
+      licenseStartedAt: licenseForm.licenseStartedAt || undefined,
+    }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['tenant-users', activeTenantId] })
+      setLicenseModal(false); setLicenseUserId(null)
+    },
   })
 
   // ── Tenant scope view ──────────────────────────────────────
@@ -557,10 +574,20 @@ export default function Users() {
                     {new Date(u.createdAt).toLocaleDateString(locale)}
                   </td>
                   <td className="px-4 py-3">
-                    <button onClick={() => { setPwdUserId(u.id); setPwdModal(true) }}
-                      className="p-1.5 rounded hover:bg-amber-50 text-gray-400 hover:text-amber-600 transition-colors" title={t.users.changePassword}>
-                      <Key size={15} />
-                    </button>
+                    <div className="flex items-center gap-1">
+                      <button onClick={() => { setPwdUserId(u.id); setPwdModal(true) }}
+                        className="p-1.5 rounded hover:bg-amber-50 text-gray-400 hover:text-amber-600 transition-colors" title={t.users.changePassword}>
+                        <Key size={15} />
+                      </button>
+                      <button onClick={() => {
+                        setLicenseUserId(u.id)
+                        setLicenseForm({ licensePlan: u.licensePlan ?? 'MONTHLY', maxUsers: '5', licenseStartedAt: '' })
+                        setLicenseModal(true)
+                      }}
+                        className="p-1.5 rounded hover:bg-blue-50 text-gray-400 hover:text-blue-600 transition-colors" title={t.users.renewLicense}>
+                        <CalendarClock size={15} />
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -615,6 +642,39 @@ export default function Users() {
       >
         <Input label={t.users.newPassword} type="password" value={newPwd}
           onChange={e => setNewPwd(e.target.value)} />
+      </Modal>
+
+      {/* Renew license modal */}
+      <Modal open={licenseModal} onClose={() => setLicenseModal(false)} title={t.users.renewLicense} size="sm"
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setLicenseModal(false)}>{t.common.cancel}</Button>
+            <Button onClick={() => licenseMut.mutate()} loading={licenseMut.isPending}>{t.common.save}</Button>
+          </>
+        }
+      >
+        <div className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">{t.users.licensePlan}</label>
+            <div className="grid grid-cols-2 gap-2">
+              {(['MONTHLY', 'YEARLY'] as const).map(plan => (
+                <button key={plan} type="button"
+                  onClick={() => setLicenseForm(p => ({ ...p, licensePlan: plan }))}
+                  className={`py-2.5 rounded-lg border-2 text-sm font-semibold transition-all
+                    ${licenseForm.licensePlan === plan
+                      ? 'border-blue-500 bg-blue-50 text-blue-700'
+                      : 'border-gray-200 text-gray-600 hover:border-gray-300'}`}
+                >
+                  {plan === 'MONTHLY' ? t.users.monthly : t.users.yearly}
+                </button>
+              ))}
+            </div>
+          </div>
+          <Input label={t.users.startDate} type="date" value={licenseForm.licenseStartedAt}
+            onChange={e => setLicenseForm(p => ({ ...p, licenseStartedAt: e.target.value }))} />
+          <p className="text-xs text-gray-400">{t.users.renewLicenseHint}</p>
+          {licenseMut.isError && <p className="text-sm text-red-600">{t.common.error}</p>}
+        </div>
       </Modal>
     </div>
   )
